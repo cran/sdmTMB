@@ -1,0 +1,115 @@
+---
+title: "Threshold modeling with sdmTMB"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Threshold modeling with sdmTMB}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+**If the code in this vignette has not been evaluated, a rendered version is available on the [documentation site](https://pbs-assess.github.io/sdmTMB/index.html) under 'Articles'.**
+
+```{r setup, include = FALSE, cache=FALSE}
+dplyr_installed <- require("dplyr", quietly = TRUE)
+ggplot_installed <- require("ggplot2", quietly = TRUE)
+inla_installed <- requireNamespace("INLA", quietly = TRUE)
+pkgs <- dplyr_installed && ggplot_installed && inla_installed
+EVAL <- identical(Sys.getenv("NOT_CRAN"), "true") && pkgs
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.asp = 0.618,
+  eval = EVAL,
+  purl = EVAL
+)
+```
+
+```{r packages, message=FALSE, warning=TRUE}
+library(ggplot2)
+library(dplyr)
+library(sdmTMB)
+```
+
+We'll repeat the same models used for the index standardization vignette, using the built-in data for Pacific cod. 
+
+As a summary, 
+- We've included columns for depth and depth squared. 
+- Depth was centred and scaled by its standard deviation and we've included those in the data frame so that they could be used to similarly scale the prediction grid.
+- The density units should be kg/km^2^.
+- Here, X and Y are coordinates in UTM zone 9.
+
+```{r glimpse-pcod}
+glimpse(pcod)
+```
+
+As before, the SPDE mesh is created using 75 knots for a balance between speed and accuracy. You will likely want to use more for applied scenarios. You will want to make sure that increasing the number of knots does not change the conclusions.
+
+```{r spde, fig.asp=0.8}
+pcod_spde <- make_mesh(pcod, c("X", "Y"), cutoff = 12)
+```
+
+We will extend the simple GLMM used in the index standardization vignette to include a threshold effect. For real applications, the threshold effect might be a function of habitat covariates, environmental variables, etc. Because 'depth' is the only external variable in the `pcod` data frame, we'll use that. For any threshold model, you can specify the model as a linear threshold (`breakpt()`) or logistic (`logistic()`) as part of the formula. Note: as before, if we want to use this model for index standardization then we need to include `0 + as.factor(year)` or `-1 + as.factor(year)` so that we have a factor predictor that represents the mean estimate for each time slice.
+
+This first example uses the 'depth_scaled' covariate (depth, standardized ~ N(0,1)) and the logistic function, similar to selectivity curves used in fisheries models. The form is 
+
+$$s(x)=\tau + \psi *\quad { \left[ 1+{ \exp }^{ -ln\left( 19 \right) \quad *\quad \left( x-s50 \right) \quad /\quad \left( s95\quad -\quad s50 \right)  } \right]  }^{ -1 }$$
+where $\psi$ is a scaling parameter (controlling the height of the y-axis for the response, and is unconstrained), $\tau$ is an intercept, $s50$ is a parameter controlling the point at which the function reaches 50% of the maximum ($\psi$), and $s95$ is a parameter controlling the point at which the function reaches 95%. The parameter $s50$ is unconstrained, and $s95$ is constrained to be larger than $s50$.
+
+```{r fitlogistic}
+m <- sdmTMB(
+  data = pcod,
+  formula = density ~ 0 + logistic(depth_scaled) + as.factor(year),
+  time = "year", mesh = pcod_spde,
+  family = tweedie(link = "log")
+)
+```
+
+We can then look at the important coefficients from the model. Here we're looking at 's50', 's95', and 'smax'.
+
+```{r outputlogistic}
+print(m)
+```
+
+We can visualize the effect:
+
+```{r logistic-eff}
+nd <- data.frame(
+  depth_scaled = seq(min(pcod$depth_scaled) + 0.5, 
+    max(pcod$depth_scaled) - 0.2, length.out = 100), 
+  year = 2015L # a chosen year
+)
+p <- predict(m, newdata = nd, se_fit = TRUE, re_form = NA)
+ggplot(p, aes(depth_scaled, exp(est), 
+  ymin = exp(est - 1.96 * est_se), 
+  ymax = exp(est + 1.96 * est_se))) +
+  geom_line() + geom_ribbon(alpha = 0.4)
+```
+
+Next, we can try to fit the same model but use a linear breakpoint / cutpoint model:
+
+```{r fitlinear}
+m <- sdmTMB(
+  data = pcod,
+  formula = density ~ 0 + breakpt(depth_scaled) + as.factor(year),
+  time = "year", mesh = pcod_spde,
+  family = tweedie(link = "log")
+)
+```
+
+For this model, the important parameters are the slope, 'depth_scaled-slope', and breakpoint, 'depth_scaled-breakpt'.
+
+```{r outputlinear}
+print(m)
+```
+
+We can visualize the linear breakpoint effect:
+
+```{r brkpt-eff, warning=FALSE}
+p <- predict(m, newdata = nd, se_fit = TRUE, re_form = NA, xy_cols = c("X", "Y"))
+ggplot(p, aes(depth_scaled, exp(est), 
+  ymin = exp(est - 1.96 * est_se), 
+  ymax = exp(est + 1.96 * est_se))) +
+  geom_line() + geom_ribbon(alpha = 0.4)
+```

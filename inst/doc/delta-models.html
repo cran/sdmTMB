@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+<meta charset="utf-8" />
+<meta name="generator" content="pandoc" />
+<meta http-equiv="X-UA-Compatible" content="IE=EDGE" />
+
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+<meta name="author" content="Julia Indivero, Philina English, Sean Anderson, Eric Ward, Lewis Barnett" />
+
+<meta name="date" content="2023-01-09" />
+
+<title>Fitting delta (hurdle) models with sdmTMB</title>
+
+<script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
+// be compatible with the behavior of Pandoc < 2.8).
+document.addEventListener('DOMContentLoaded', function(e) {
+  var hs = document.querySelectorAll("div.section[class*='level'] > :first-child");
+  var i, h, a;
+  for (i = 0; i < hs.length; i++) {
+    h = hs[i];
+    if (!/^h[1-6]$/i.test(h.tagName)) continue;  // it should be a header h1-h6
+    a = h.attributes;
+    while (a.length > 0) h.removeAttribute(a[0].name);
+  }
+});
+</script>
+
+<style type="text/css">
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+span.underline{text-decoration: underline;}
+div.column{display: inline-block; vertical-align: top; width: 50%;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+</style>
+
+
+
+<style type="text/css">
+code {
+white-space: pre;
+}
+.sourceCode {
+overflow: visible;
+}
+</style>
+<style type="text/css" data-origin="pandoc">
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+{ counter-reset: source-line 0; }
+pre.numberSource code > span
+{ position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+{ content: counter(source-line);
+position: relative; left: -1em; text-align: right; vertical-align: baseline;
+border: none; display: inline-block;
+-webkit-touch-callout: none; -webkit-user-select: none;
+-khtml-user-select: none; -moz-user-select: none;
+-ms-user-select: none; user-select: none;
+padding: 0 4px; width: 4em;
+color: #aaaaaa;
+}
+pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa; padding-left: 4px; }
+div.sourceCode
+{ }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+code span.al { color: #ff0000; font-weight: bold; } 
+code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.at { color: #7d9029; } 
+code span.bn { color: #40a070; } 
+code span.bu { color: #008000; } 
+code span.cf { color: #007020; font-weight: bold; } 
+code span.ch { color: #4070a0; } 
+code span.cn { color: #880000; } 
+code span.co { color: #60a0b0; font-style: italic; } 
+code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.do { color: #ba2121; font-style: italic; } 
+code span.dt { color: #902000; } 
+code span.dv { color: #40a070; } 
+code span.er { color: #ff0000; font-weight: bold; } 
+code span.ex { } 
+code span.fl { color: #40a070; } 
+code span.fu { color: #06287e; } 
+code span.im { color: #008000; font-weight: bold; } 
+code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.kw { color: #007020; font-weight: bold; } 
+code span.op { color: #666666; } 
+code span.ot { color: #007020; } 
+code span.pp { color: #bc7a00; } 
+code span.sc { color: #4070a0; } 
+code span.ss { color: #bb6688; } 
+code span.st { color: #4070a0; } 
+code span.va { color: #19177c; } 
+code span.vs { color: #4070a0; } 
+code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } 
+</style>
+<script>
+// apply pandoc div.sourceCode style to pre.sourceCode instead
+(function() {
+  var sheets = document.styleSheets;
+  for (var i = 0; i < sheets.length; i++) {
+    if (sheets[i].ownerNode.dataset["origin"] !== "pandoc") continue;
+    try { var rules = sheets[i].cssRules; } catch (e) { continue; }
+    var j = 0;
+    while (j < rules.length) {
+      var rule = rules[j];
+      // check if there is a div.sourceCode rule
+      if (rule.type !== rule.STYLE_RULE || rule.selectorText !== "div.sourceCode") {
+        j++;
+        continue;
+      }
+      var style = rule.style.cssText;
+      // check if color or background-color is set
+      if (rule.style.color === '' && rule.style.backgroundColor === '') {
+        j++;
+        continue;
+      }
+      // replace div.sourceCode by a pre.sourceCode rule
+      sheets[i].deleteRule(j);
+      sheets[i].insertRule('pre.sourceCode{' + style + '}', j);
+    }
+  }
+})();
+</script>
+
+
+
+
+<style type="text/css">body {
+background-color: #fff;
+margin: 1em auto;
+max-width: 700px;
+overflow: visible;
+padding-left: 2em;
+padding-right: 2em;
+font-family: "Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+font-size: 14px;
+line-height: 1.35;
+}
+#TOC {
+clear: both;
+margin: 0 0 10px 10px;
+padding: 4px;
+width: 400px;
+border: 1px solid #CCCCCC;
+border-radius: 5px;
+background-color: #f6f6f6;
+font-size: 13px;
+line-height: 1.3;
+}
+#TOC .toctitle {
+font-weight: bold;
+font-size: 15px;
+margin-left: 5px;
+}
+#TOC ul {
+padding-left: 40px;
+margin-left: -1.5em;
+margin-top: 5px;
+margin-bottom: 5px;
+}
+#TOC ul ul {
+margin-left: -2em;
+}
+#TOC li {
+line-height: 16px;
+}
+table {
+margin: 1em auto;
+border-width: 1px;
+border-color: #DDDDDD;
+border-style: outset;
+border-collapse: collapse;
+}
+table th {
+border-width: 2px;
+padding: 5px;
+border-style: inset;
+}
+table td {
+border-width: 1px;
+border-style: inset;
+line-height: 18px;
+padding: 5px 5px;
+}
+table, table th, table td {
+border-left-style: none;
+border-right-style: none;
+}
+table thead, table tr.even {
+background-color: #f7f7f7;
+}
+p {
+margin: 0.5em 0;
+}
+blockquote {
+background-color: #f6f6f6;
+padding: 0.25em 0.75em;
+}
+hr {
+border-style: solid;
+border: none;
+border-top: 1px solid #777;
+margin: 28px 0;
+}
+dl {
+margin-left: 0;
+}
+dl dd {
+margin-bottom: 13px;
+margin-left: 13px;
+}
+dl dt {
+font-weight: bold;
+}
+ul {
+margin-top: 0;
+}
+ul li {
+list-style: circle outside;
+}
+ul ul {
+margin-bottom: 0;
+}
+pre, code {
+background-color: #f7f7f7;
+border-radius: 3px;
+color: #333;
+white-space: pre-wrap; 
+}
+pre {
+border-radius: 3px;
+margin: 5px 0px 10px 0px;
+padding: 10px;
+}
+pre:not([class]) {
+background-color: #f7f7f7;
+}
+code {
+font-family: Consolas, Monaco, 'Courier New', monospace;
+font-size: 85%;
+}
+p > code, li > code {
+padding: 2px 0px;
+}
+div.figure {
+text-align: center;
+}
+img {
+background-color: #FFFFFF;
+padding: 2px;
+border: 1px solid #DDDDDD;
+border-radius: 3px;
+border: 1px solid #CCCCCC;
+margin: 0 5px;
+}
+h1 {
+margin-top: 0;
+font-size: 35px;
+line-height: 40px;
+}
+h2 {
+border-bottom: 4px solid #f7f7f7;
+padding-top: 10px;
+padding-bottom: 2px;
+font-size: 145%;
+}
+h3 {
+border-bottom: 2px solid #f7f7f7;
+padding-top: 10px;
+font-size: 120%;
+}
+h4 {
+border-bottom: 1px solid #f7f7f7;
+margin-left: 8px;
+font-size: 105%;
+}
+h5, h6 {
+border-bottom: 1px solid #ccc;
+font-size: 105%;
+}
+a {
+color: #0033dd;
+text-decoration: none;
+}
+a:hover {
+color: #6666ff; }
+a:visited {
+color: #800080; }
+a:visited:hover {
+color: #BB00BB; }
+a[href^="http:"] {
+text-decoration: underline; }
+a[href^="https:"] {
+text-decoration: underline; }
+
+code > span.kw { color: #555; font-weight: bold; } 
+code > span.dt { color: #902000; } 
+code > span.dv { color: #40a070; } 
+code > span.bn { color: #d14; } 
+code > span.fl { color: #d14; } 
+code > span.ch { color: #d14; } 
+code > span.st { color: #d14; } 
+code > span.co { color: #888888; font-style: italic; } 
+code > span.ot { color: #007020; } 
+code > span.al { color: #ff0000; font-weight: bold; } 
+code > span.fu { color: #900; font-weight: bold; } 
+code > span.er { color: #a61717; background-color: #e3d2d2; } 
+</style>
+
+
+
+
+</head>
+
+<body>
+
+
+
+
+<h1 class="title toc-ignore">Fitting delta (hurdle) models with
+sdmTMB</h1>
+<h4 class="author">Julia Indivero, Philina English, Sean Anderson, Eric
+Ward, Lewis Barnett</h4>
+<h4 class="date">2023-01-09</h4>
+
+
+
+<p><strong>If the code in this vignette has not been evaluated, a
+rendered version is available on the <a href="https://pbs-assess.github.io/sdmTMB/index.html">documentation
+site</a> under ‘Articles’.</strong></p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(ggplot2)</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(dplyr)</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(sdmTMB)</span></code></pre></div>
+<p>sdmTMB has the capability for built-in hurdle models (also called
+delta models). These are models with one model for zero vs. non-zero
+data and another component for the positive component. Hurdle models
+could also be implemented by fitting the two components separately and
+combining the predictions.</p>
+<p>Hurdle models are more appropriate than something like a Tweedie when
+there are differences in the processes controlling presence
+vs. abundance, or when greater flexibility to account for dispersion is
+required.</p>
+<p>Built-in hurdle models can be specified with the <code>family</code>
+argument within the <code>sdmTMB()</code> function. Current options
+include:</p>
+<ol style="list-style-type: decimal">
+<li><p>Delta-Gamma:
+<code>family = delta_gamma(link1 = &quot;logit&quot;, link2 = &quot;log&quot;)</code>. This
+fits a binomial presence-absence model (i.e.,
+<code>binomial(link = &quot;logit&quot;)</code>) and then a model for the positive
+catches only with a Gamma observation distribution and a log link (i.e.,
+<code>Gamma(link = &quot;log&quot;)</code>). Here and with other delta models, the
+<code>link1</code> and <code>link2</code> can be omitted and left at
+their default values.</p></li>
+<li><p>Delta-lognormal: <code>family = delta_lognormal()</code>. This
+fits a binomial presence-absence model (i.e.,
+<code>binomial(link = &quot;logit&quot;)</code>) and then a model for the positive
+catches only with a lognormal observation distribution and a log link
+(i.e., <code>lognormal(link = &quot;log&quot;)</code></p></li>
+</ol>
+<!-- Currently not supported: 3. A Poisson-link delta model: `family = delta_poisson_link_gamma()` -->
+<!-- This fits a binomial presence-absence model (`family = binomial(link = "logit")`) and then a model for the positive catches only with a Poisson observation distribution and a log link  -->
+<ol start="3" style="list-style-type: decimal">
+<li>Delta-truncated-negative-binomial:
+<code>family = delta_truncated_nbinom1()</code> or
+<code>family = delta_truncated_nbinom2()</code>. This fits a binomial
+presence-absence model (<code>binomial(link = &quot;logit&quot;)</code>) and a
+<code>truncated_nbinom1(link = &quot;log&quot;)</code> or
+<code>truncated_nbinom1(link = &quot;log&quot;)</code> distribution for positive
+catches.</li>
+</ol>
+<p>To summarize the built-in delta models and the separate
+components:</p>
+<table>
+<colgroup>
+<col width="14%" />
+<col width="28%" />
+<col width="26%" />
+<col width="31%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Model Type</th>
+<th>Built-in delta function</th>
+<th>Presence-absence model</th>
+<th>Positive catch model</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Delta-gamma</td>
+<td><code>delta_gamma()</code></td>
+<td><code>binomial(link = &quot;logit&quot;)</code></td>
+<td><code>Gamma(link = &quot;log&quot;)</code></td>
+</tr>
+<tr class="even">
+<td>Delta-lognormal</td>
+<td><code>delta_lognormal()</code></td>
+<td><code>binomial(link = &quot;logit&quot;)</code></td>
+<td><code>lognormal(link = &quot;log&quot;)</code></td>
+</tr>
+<tr class="odd">
+<td>Delta-NB1</td>
+<td><code>delta_truncated_nbinom1()</code></td>
+<td><code>binomial(link = &quot;logit&quot;)</code></td>
+<td><code>truncated_nbinom1(link = &quot;log&quot;)</code></td>
+</tr>
+<tr class="even">
+<td>Delta-NB2</td>
+<td><code>delta_truncated_nbinom2()</code></td>
+<td><code>binomial(link = &quot;logit&quot;)</code></td>
+<td><code>truncated_nbinom2(link = &quot;log&quot;)</code></td>
+</tr>
+</tbody>
+</table>
+<!-- Add back to table when included again: Poisson-link delta |`family = delta_poisson_link_gamma()`|`family = binomial(link = "logit")`| `family = lognormal(link = "log")`  -->
+<div id="example-with-built-in-delta-model" class="section level1">
+<h1>Example with built-in delta model</h1>
+<p>Here, we will show an example of fitting using the built-in delta
+functionality, as well as how to build each model component separately
+and then combine. The built-in approach is convenient, allows for
+parameters to be shared across components, and allows for calculation of
+derived quantities such as standardized indexes
+(<code>get_index()</code>) with internally calculated standard
+errors.</p>
+<p>We will use a dataset built into the sdmTMB package: trawl survey
+data for Pacific Cod in Queen Charlotte Sound, British Columbia, Canada.
+The density units are kg/km<sup>2</sup>. Here, X and Y are coordinates
+in UTM zone 9.</p>
+<p>We will first create a mesh that we will use for all the models.</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>pcod_mesh <span class="ot">&lt;-</span> <span class="fu">make_mesh</span>(pcod, <span class="fu">c</span>(<span class="st">&quot;X&quot;</span>, <span class="st">&quot;Y&quot;</span>), <span class="at">cutoff =</span> <span class="dv">15</span>)</span></code></pre></div>
+<p>Then we can fit a model of Pacific cod density using a delta-gamma
+model, including a smoothed effect of depth.</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>fit_dg <span class="ot">&lt;-</span> <span class="fu">sdmTMB</span>(density <span class="sc">~</span> <span class="dv">1</span> <span class="sc">+</span> <span class="fu">s</span>(depth),</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> pcod,</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">mesh =</span> pcod_mesh,</span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">time =</span> <span class="st">&quot;year&quot;</span>,</span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">family =</span> <span class="fu">delta_gamma</span>()</span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div>
+<p>The default in built-in delta models is for the formula, spatial and
+spatio-temporal structure, and anisotropy to be shared between the two
+model components. However, some elements (<code>formula</code>,
+<code>spatial</code>, <code>spatiotemporal</code>, and
+<code>share_range</code>) can also be specified independently for each
+model using a list format within the function argument (see examples
+below). The first element of the list is for the binomial component and
+the second element is for the positive component (e.g., Gamma). Some
+elements must be shared for now (e.g., smoothers, spatially varying
+coefficients, and time-varying coefficients).</p>
+<p>To specify the settings for spatial and spatio-temporal effects in
+each model component, create a list of settings within the
+<code>spatial</code> and <code>spatiotemporal</code> arguments. For
+example,
+<code>spatial = list(&quot;on&quot;, &quot;off&quot;), spatiotemporal = list(&quot;off&quot;, &quot;rw&quot;)</code>.</p>
+<p>We could similarly specify a different formula for each component of
+the model, using <code>list(y ~ x1, y ~ x2)</code> For instance, we
+could include the effect of depth for only the positive model, and
+remove it for the presence-absence model.</p>
+<p>However, there are currently limitations if specifying separate
+formulas for each model component. The two formulas <em>cannot</em>
+have:</p>
+<ul>
+<li>smoothers</li>
+<li>threshold effects</li>
+<li>random intercepts</li>
+</ul>
+<p>For now, these must be specified through a single formula that is
+shared across the two models.</p>
+<p>Each model component can similarly have separate settings for
+<code>share_range</code>, which determines whether there is a shared
+spatial and spatiotemporal range parameter (<code>TRUE</code>) or
+independent range parameters (<code>FALSE</code>), by using a list.</p>
+<p>Lastly, whether or not anisotropy is included in the model is
+determined with the logical argument <code>anisotropy</code> (i.e.,
+<code>TRUE</code> or <code>FALSE</code>), and cannot be separately
+specified for each model. If anisotropy is included, it is by default
+shared across the two model components. However it can be made unique in
+each model component by using <code>sdmTMBcontrol(map = ...)</code> and
+adding the argument <code>control</code> when fitting the model. This
+‘maps’ the anisotropy parameters be unique across model components.</p>
+<p>Once we fit the delta model, we can evaluate and plot the output,
+diagnostics, and predictions similar to other sdmTMB models.</p>
+<p>The printed model output will show estimates and standard errors of
+parameters for each model separately.</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(fit_dg)</span></code></pre></div>
+<p>Using the <code>tidy()</code> function will turn the sdmTMB model
+output into a data frame, with the argument <code>model=1</code> or
+<code>model=2</code> to specify which model component to extract as a
+dataframe. See <code>tidy.sdmTMB()</code> for additional arguments and
+options.</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tidy</span>(fit_dg) <span class="co"># model = 1 is default</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="fu">tidy</span>(fit_dg, <span class="at">model =</span> <span class="dv">1</span>)</span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a><span class="fu">tidy</span>(fit_dg, <span class="at">model =</span> <span class="dv">1</span>, <span class="st">&quot;ran_pars&quot;</span>, <span class="at">conf.int =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a><span class="fu">tidy</span>(fit_dg, <span class="at">model =</span> <span class="dv">2</span>)</span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a><span class="fu">tidy</span>(fit_dg, <span class="at">model =</span> <span class="dv">2</span>, <span class="st">&quot;ran_pars&quot;</span>, <span class="at">conf.int =</span> <span class="cn">TRUE</span>)</span></code></pre></div>
+<p>We can use <code>predict()</code> to predict density in either log
+space (the default) or transformed into the response scale
+(<code>type = &quot;response&quot;</code>).</p>
+<p>For built-in delta models, the default function will return estimated
+response and parameters for each grid cell for each model separately,
+notated with a 1 (for the presence/absence model) or 2 (for the positive
+catch model) in the column name. See <code>predict.sdmTMB()</code> for a
+description of values in the data frame.</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a>p <span class="ot">&lt;-</span> <span class="fu">predict</span>(fit_dg, <span class="at">newdata =</span> qcs_grid)</span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="fu">str</span>(p)</span></code></pre></div>
+<div class="sourceCode" id="cb7"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a>p_response <span class="ot">&lt;-</span> <span class="fu">predict</span>(fit_dg, <span class="at">newdata =</span> qcs_grid, <span class="at">type =</span> <span class="st">&quot;response&quot;</span>)</span></code></pre></div>
+<p>We can use the <code>model</code> argument to return only predictions
+from model 1 or model 2.</p>
+<p>To return combined predictions from both components on the response
+scale, we can use <code>model=NA</code></p>
+<p>We can use predictions from the built-in delta model (making sure
+that <code>return_tmb_object=TRUE</code>) to get the index values using
+the <code>get_index()</code> function. This can be used with predictions
+that include both the first and second models (i.e., using the default
+and specifying no <code>model</code> argument) or with predictions
+generated using <code>model=NA</code>. The <code>get_index()</code>
+function will automatically combine predictions from the first and
+second model in calculating the index values. For more on modelling for
+the purposes of creating an index see the vignette on <a href="https://pbs-assess.github.io/sdmTMB/articles/index-standardization.html">Index
+standardization with sdmTMB</a>.</p>
+<div class="sourceCode" id="cb8"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a>p2 <span class="ot">&lt;-</span> <span class="fu">predict</span>(fit_dg, <span class="at">newdata =</span> qcs_grid, <span class="at">return_tmb_object =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>ind_dg <span class="ot">&lt;-</span> <span class="fu">get_index</span>(p2, <span class="at">bias_correct =</span> <span class="cn">FALSE</span>)</span></code></pre></div>
+<p>We can plot conditional effects of covariates (such as depth in the
+example model) using the package <code>visreg</code> by specifying each
+model component with <code>model=1</code> for the presence-absence model
+or <code>model=2</code> for the positive catch model. Currently,
+plotting effects of built-in delta models with <code>ggeffects</code> is
+not supported. See the vignette on using <a href="https://pbs-assess.github.io/sdmTMB/articles/visreg.html">visreg</a>
+with sdmTMB for more information.</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="fu">visreg_delta</span>(fit_dg, <span class="at">xvar =</span> <span class="st">&quot;depth&quot;</span>, <span class="at">model =</span> <span class="dv">1</span>, <span class="at">gg =</span> <span class="cn">TRUE</span>)</span></code></pre></div>
+<div class="sourceCode" id="cb10"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="fu">visreg_delta</span>(fit_dg, <span class="at">xvar =</span> <span class="st">&quot;depth&quot;</span>, <span class="at">model =</span> <span class="dv">2</span>, <span class="at">gg =</span> <span class="cn">TRUE</span>)</span></code></pre></div>
+<p>The built-in delta models can also be evaluated with the
+<code>residuals()</code> functions in sdmTMB. Similarly to generating
+predictions, we can specify which of the model components we want to
+return residuals for using the <code>model</code> argument and
+specifying <code>=1</code> or <code>=2</code>. See
+<code>residuals.sdmTMB()</code> for additional options for evaluating
+residuals in sdmTMB models.</p>
+<p>We can also simulate new observations from a fitted delta model. As
+in other functions, we can specify which model to simulate from using
+the argument <code>model=1</code> for only presence/absence,
+<code>model=2</code> for only positive catches, or <code>model=NA</code>
+for combined predictions. See <code>simulate.sdmTMB()</code> for more
+details on simulation options.</p>
+<div class="sourceCode" id="cb11"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a>simulations <span class="ot">&lt;-</span> <span class="fu">simulate</span>(fit_dg, <span class="at">nsim =</span> <span class="dv">5</span>, <span class="at">seed =</span> <span class="dv">5090</span>, <span class="at">model =</span> <span class="cn">NA</span>)</span></code></pre></div>
+</div>
+<div id="delta-models-by-fitting-two-components-separately-and-combining-predictions" class="section level1">
+<h1>Delta models by fitting two components separately and combining
+predictions</h1>
+<p>Next, we will show an example of how to implement a delta-gamma model
+in sdmTMB, but with each component fit separately and then combined.
+This approach gives maximum flexibility for each model and lets you
+develop them on at a time. It has limitations if you are calculating an
+index of abundance or if you want to share some parameters.</p>
+<div class="sourceCode" id="cb12"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="fu">glimpse</span>(pcod)</span></code></pre></div>
+<div class="sourceCode" id="cb13"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a>mesh1 <span class="ot">&lt;-</span> <span class="fu">make_mesh</span>(pcod, <span class="fu">c</span>(<span class="st">&quot;X&quot;</span>, <span class="st">&quot;Y&quot;</span>), <span class="at">cutoff =</span> <span class="dv">20</span>) <span class="co"># coarse for vignette speed</span></span></code></pre></div>
+<p>It is not necessary to use the same mesh for both models, but one can
+do so by updating the first mesh to match the reduced data frame as
+shown here:</p>
+<div class="sourceCode" id="cb14"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a>dat2 <span class="ot">&lt;-</span> <span class="fu">subset</span>(pcod, density <span class="sc">&gt;</span> <span class="dv">0</span>)</span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>mesh2 <span class="ot">&lt;-</span> <span class="fu">make_mesh</span>(dat2,</span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">xy_cols =</span> <span class="fu">c</span>(<span class="st">&quot;X&quot;</span>, <span class="st">&quot;Y&quot;</span>),</span>
+<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">mesh =</span> mesh1<span class="sc">$</span>mesh</span>
+<span id="cb14-5"><a href="#cb14-5" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div>
+<p>This delta-gamma model is similar to the Tweedie model in the <a href="https://pbs-assess.github.io/sdmTMB/articles/basic-intro.html">Intro
+to modelling with sdmTMB</a> vignette, except that we will use
+<code>s()</code> for the depth effect.</p>
+<div class="sourceCode" id="cb15"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a>m1 <span class="ot">&lt;-</span> <span class="fu">sdmTMB</span>(</span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">formula =</span> present <span class="sc">~</span> <span class="dv">0</span> <span class="sc">+</span> <span class="fu">as.factor</span>(year) <span class="sc">+</span> <span class="fu">s</span>(depth, <span class="at">k =</span> <span class="dv">3</span>),</span>
+<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> pcod,</span>
+<span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">mesh =</span> mesh1,</span>
+<span id="cb15-5"><a href="#cb15-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">time =</span> <span class="st">&quot;year&quot;</span>, <span class="at">family =</span> <span class="fu">binomial</span>(<span class="at">link =</span> <span class="st">&quot;logit&quot;</span>),</span>
+<span id="cb15-6"><a href="#cb15-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">spatiotemporal =</span> <span class="st">&quot;iid&quot;</span>,</span>
+<span id="cb15-7"><a href="#cb15-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">spatial =</span> <span class="st">&quot;on&quot;</span></span>
+<span id="cb15-8"><a href="#cb15-8" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb15-9"><a href="#cb15-9" aria-hidden="true" tabindex="-1"></a>m1</span></code></pre></div>
+<p>One can use different covariates in each model, but in this case we
+will just let the depth effect be more wiggly by not specifying
+<code>k = 3</code>.</p>
+<div class="sourceCode" id="cb16"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a>m2 <span class="ot">&lt;-</span> <span class="fu">sdmTMB</span>(</span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">formula =</span> density <span class="sc">~</span> <span class="dv">0</span> <span class="sc">+</span> <span class="fu">as.factor</span>(year) <span class="sc">+</span> <span class="fu">s</span>(depth),</span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> dat2,</span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">mesh =</span> mesh2,</span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">time =</span> <span class="st">&quot;year&quot;</span>,</span>
+<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">family =</span> <span class="fu">Gamma</span>(<span class="at">link =</span> <span class="st">&quot;log&quot;</span>),</span>
+<span id="cb16-7"><a href="#cb16-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">spatiotemporal =</span> <span class="st">&quot;iid&quot;</span>,</span>
+<span id="cb16-8"><a href="#cb16-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">spatial =</span> <span class="st">&quot;on&quot;</span></span>
+<span id="cb16-9"><a href="#cb16-9" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb16-10"><a href="#cb16-10" aria-hidden="true" tabindex="-1"></a>m2</span></code></pre></div>
+<p>Next, we need some way of combining the predictions across the two
+models. If all we need are point predictions, we can just multiply the
+predictions from the two models after applying the inverse link:</p>
+<div class="sourceCode" id="cb17"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a>pred <span class="ot">&lt;-</span> qcs_grid <span class="co"># use the grid as template for saving our predictions</span></span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>p_bin <span class="ot">&lt;-</span> <span class="fu">predict</span>(m1, <span class="at">newdata =</span> qcs_grid)</span>
+<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a>p_pos <span class="ot">&lt;-</span> <span class="fu">predict</span>(m2, <span class="at">newdata =</span> qcs_grid)</span>
+<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a>p_bin_prob <span class="ot">&lt;-</span> m1<span class="sc">$</span>family<span class="sc">$</span><span class="fu">linkinv</span>(p_bin<span class="sc">$</span>est)</span>
+<span id="cb17-5"><a href="#cb17-5" aria-hidden="true" tabindex="-1"></a>p_pos_exp <span class="ot">&lt;-</span> m2<span class="sc">$</span>family<span class="sc">$</span><span class="fu">linkinv</span>(p_pos<span class="sc">$</span>est)</span>
+<span id="cb17-6"><a href="#cb17-6" aria-hidden="true" tabindex="-1"></a>pred<span class="sc">$</span>est_exp <span class="ot">&lt;-</span> p_bin_prob <span class="sc">*</span> p_pos_exp</span></code></pre></div>
+<p>But if a measure of uncertainty is required, we can simulate from the
+joint parameter precision matrix using the <code>predict()</code>
+function with any number of simulations selected (e.g.,
+<code>sims = 500</code>). Because the predictions come from simulated
+draws from the parameter covariance matrix, the predictions will become
+more consistent with a larger number of draws. However, a greater number
+of draws takes longer to calculate and will use more memory (larger
+matrix), so fewer draws (~100) may be fine for experimentation. A larger
+number (say ~1000) may be appropriate for final model runs.</p>
+<div class="sourceCode" id="cb18"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">28239</span>)</span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a>p_bin_sim <span class="ot">&lt;-</span> <span class="fu">predict</span>(m1, <span class="at">newdata =</span> qcs_grid, <span class="at">nsim =</span> <span class="dv">100</span>)</span>
+<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a>p_pos_sim <span class="ot">&lt;-</span> <span class="fu">predict</span>(m2, <span class="at">newdata =</span> qcs_grid, <span class="at">nsim =</span> <span class="dv">100</span>)</span>
+<span id="cb18-4"><a href="#cb18-4" aria-hidden="true" tabindex="-1"></a>p_bin_prob_sim <span class="ot">&lt;-</span> m1<span class="sc">$</span>family<span class="sc">$</span><span class="fu">linkinv</span>(p_bin_sim)</span>
+<span id="cb18-5"><a href="#cb18-5" aria-hidden="true" tabindex="-1"></a>p_pos_exp_sim <span class="ot">&lt;-</span> m2<span class="sc">$</span>family<span class="sc">$</span><span class="fu">linkinv</span>(p_pos_sim)</span>
+<span id="cb18-6"><a href="#cb18-6" aria-hidden="true" tabindex="-1"></a>p_combined_sim <span class="ot">&lt;-</span> p_bin_prob_sim <span class="sc">*</span> p_pos_exp_sim</span></code></pre></div>
+<p><code>p_combined_sim</code> is a matrix with a row for each row of
+data that was predicted on and width <code>nsim</code>. You can process
+this matrix however you would like. We can save median predictions and
+upper and lower 95% confidence intervals:</p>
+<div class="sourceCode" id="cb19"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a>pred<span class="sc">$</span>median <span class="ot">&lt;-</span> <span class="fu">apply</span>(p_combined_sim, <span class="dv">1</span>, median)</span>
+<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(pred<span class="sc">$</span>est_exp, pred<span class="sc">$</span>median)</span></code></pre></div>
+<div class="sourceCode" id="cb20"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(<span class="fu">subset</span>(pred, year <span class="sc">==</span> <span class="dv">2017</span>), <span class="fu">aes</span>(X, Y, <span class="at">fill =</span> median)) <span class="sc">+</span></span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_raster</span>() <span class="sc">+</span></span>
+<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">coord_fixed</span>() <span class="sc">+</span></span>
+<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_fill_viridis_c</span>(<span class="at">trans =</span> <span class="st">&quot;sqrt&quot;</span>)</span></code></pre></div>
+<p>And we can calculate spatial uncertainty:</p>
+<div class="sourceCode" id="cb21"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a>pred<span class="sc">$</span>cv <span class="ot">&lt;-</span> <span class="fu">apply</span>(p_combined_sim, <span class="dv">1</span>, <span class="cf">function</span>(x) <span class="fu">sd</span>(x) <span class="sc">/</span> <span class="fu">mean</span>(x))</span>
+<span id="cb21-2"><a href="#cb21-2" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(<span class="fu">subset</span>(pred, year <span class="sc">==</span> <span class="dv">2017</span>), <span class="fu">aes</span>(X, Y, <span class="at">fill =</span> cv)) <span class="sc">+</span> <span class="co"># 2017 as an example</span></span>
+<span id="cb21-3"><a href="#cb21-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_raster</span>() <span class="sc">+</span></span>
+<span id="cb21-4"><a href="#cb21-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">coord_fixed</span>() <span class="sc">+</span></span>
+<span id="cb21-5"><a href="#cb21-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_fill_viridis_c</span>(<span class="at">trans =</span> <span class="st">&quot;log10&quot;</span>)</span></code></pre></div>
+<!-- sdmTMB also has a function for calculating an index from those draws `get_index_sims()`. -->
+<!-- This function is just summing biomass or abundance across grid cells for each simulation draw and for each year and then calculating quantiles on the distribution of samples. -->
+<!-- The default for this function expects the simulations to still be in log space. -->
+<!-- This index from simulated draws is an approximation.  -->
+<!-- We recommend using the built-in delta model and `get_index(..., bias_correct = TRUE)` for final inference in important applications. -->
+</div>
+
+
+
+<!-- code folding -->
+
+
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+  (function () {
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src  = "https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+    document.getElementsByTagName("head")[0].appendChild(script);
+  })();
+</script>
+
+</body>
+</html>

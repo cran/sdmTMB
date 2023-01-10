@@ -1,0 +1,27 @@
+test_that("Forecasting works with a time-varying parameter", {
+  skip_on_cran()
+  skip_on_ci()
+  skip_if_not_installed("INLA")
+  spde <- make_mesh(pcod, c("X", "Y"), n_knots = 50, type = "kmeans")
+  grid2019 <- qcs_grid[qcs_grid$year == max(qcs_grid$year), ]
+  grid2019$year <- 2019L
+  qcsgrid_forecast <- rbind(qcs_grid, grid2019)
+  grid2019$year <- 2018L
+  qcsgrid_forecast <- rbind(qcsgrid_forecast, grid2019)
+  grid2019$year <- 2016L
+  qcsgrid_forecast <- rbind(qcsgrid_forecast, grid2019)
+
+  m <- sdmTMB(
+    data = pcod, formula = density ~ 0,
+    time_varying = ~ 1,
+    spatiotemporal = "AR1",
+    extra_time = c(2016L, 2018L, 2019L),
+    spatial = FALSE,
+    time = "year",
+    mesh = spde,
+    family = tweedie(link = "log")
+  )
+  print(m)
+  predictions <- predict(m, newdata = qcsgrid_forecast)
+  expect_true("data.frame" %in% class(predictions))
+})
