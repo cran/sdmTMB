@@ -80,9 +80,10 @@ NULL
 #'   to sum to one and are not internally modified. Can also be used for trials
 #'   with the binomial family; the `weights` argument needs to be a vector and not
 #'   a name of the variable in the data frame. See the Details section below.
-#' @param offset A numeric vector representing the model offset. In delta/hurdle
-#'   models, this applies only to the positive component. Usually a log
-#'   transformed variable. The `offset` argument needs to be a vector and not a name of the variable in the data frame.
+#' @param offset A numeric vector representing the model offset *or* a character
+#'   value representing the column name of the offset. In delta/hurdle models,
+#'   this applies only to the positive component. Usually a log
+#'   transformed variable.
 #' @param extra_time Optional extra time slices (e.g., years) to include for
 #'   interpolation or forecasting with the predict function. See the Details
 #'   section below.
@@ -150,7 +151,7 @@ NULL
 #' * `gradients`: log likelihood gradients with respect to each fixed effect
 #' * `model`: output from [stats::nlminb()]
 #' * `data`: the fitted data
-#' * `mesh`: the object that was supplied to the `mesh` argmument
+#' * `mesh`: the object that was supplied to the `mesh` argument
 #' * `family`: the family object, which includes the inverse link function as `family$linkinv()`
 #' * `tmb_params`: The parameters list passed to [TMB::MakeADFun()]
 #' * `tmb_map`: The 'map' list passed to [TMB::MakeADFun()]
@@ -382,8 +383,7 @@ NULL
 #' p <- predict(fit)
 #'
 #' # Predict on new data:
-#' nd <- subset(qcs_grid, year == 2017)
-#' p <- predict(fit, newdata = nd)
+#' p <- predict(fit, newdata = qcs_grid)
 #' head(p)
 #'
 #' # Add spatiotemporal random fields:
@@ -742,6 +742,10 @@ sdmTMB <- function(
     formula <- list(thresh[[1]]$formula, thresh[[2]]$formula)
   }
 
+  if (is.character(offset)) {
+    offset <- data[[offset]]
+  }
+
   if (!is.null(extra_time)) { # for forecasting or interpolating
     data[["__sdmTMB_offset__"]] <- offset
     data <- expand_time(df = data, time_slices = extra_time, time_column = time)
@@ -1020,7 +1024,7 @@ sdmTMB <- function(
     priors_b_mean = priors_b[not_na,1],
     priors_b_Sigma = priors_b_Sigma,
     priors = as.numeric(unlist(.priors)),
-    share_range = as.integer(share_range),
+    share_range = as.integer(if (length(share_range) == 1L) rep(share_range, 2L) else share_range),
     include_spatial = as.integer(include_spatial),
     proj_mesh  = Matrix::Matrix(c(0,0,2:0), 3, 5), # dummy
     proj_X_ij  = list(matrix(0, ncol = 1, nrow = 1)), # dummy
@@ -1529,6 +1533,9 @@ parse_spatial_arg <- function(spatial) {
 
 check_irregalar_time <- function(data, time, spatiotemporal, time_varying) {
   if (any(spatiotemporal %in% c("ar1", "rw")) || !is.null(time_varying)) {
+    if (!is.numeric(data[[time]])) {
+      cli_abort("Time column should be integer or numeric if using AR(1) or random walk processes.")
+    }
     ti <- sort(unique(data[[time]]))
     if (length(unique(diff(ti))) > 1L) {
       missed <- find_missing_time(data[[time]])

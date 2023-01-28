@@ -5,7 +5,7 @@
 #'
 #' Optional priors/penalties on model parameters. This results in penalized
 #' likelihood within TMB or can be used as priors if the model is passed to
-#' \pkg{tmbstan} (see the example in [extract_mcmc()]).
+#' \pkg{tmbstan} (see the Bayesian vignette).
 #'
 #' **Note that Jacobian adjustments are only made if `bayesian = TRUE`** when the
 #' [sdmTMB()] model is fit. I.e., the final model will be fit with \pkg{tmbstan}
@@ -49,10 +49,10 @@
 #' constructing priors. arXiv:1403.4630
 #'
 #' @param matern_s A PC (Penalized Complexity) prior (`pc_matern()`) on the
-#'   spatial random field Matern parameters.
+#'   spatial random field Matérn parameters.
 #' @param matern_st Same as `matern_s` but for the spatiotemporal random field.
 #'   Note that you will likely want to set `share_fields = FALSE` if you choose
-#'   to set both a spatial and spatiotemporal Matern PC prior since they both
+#'   to set both a spatial and spatiotemporal Matérn PC prior since they both
 #'   include a prior on the spatial range parameter.
 #' @param phi A `halfnormal()` prior for the dispersion parameter in the
 #'   observation distribution.

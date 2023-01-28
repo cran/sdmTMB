@@ -10,6 +10,7 @@
 #' @param exponentiate Whether to exponentiate the fixed-effect coefficient
 #'   estimates and confidence intervals.
 #' @param model Which model to tidy if a delta model (1 or 2).
+#' @param silent Omit any messages?
 #' @param ... Extra arguments (not used).
 #'
 #' @return A data frame
@@ -44,7 +45,8 @@
 #' tidy(fit, "ran_vals")
 
 tidy.sdmTMB <- function(x, effects = c("fixed", "ran_pars", "ran_vals"), model = 1,
-                 conf.int = FALSE, conf.level = 0.95, exponentiate = FALSE, ...) {
+                 conf.int = FALSE, conf.level = 0.95, exponentiate = FALSE,
+                 silent = FALSE, ...) {
   effects <- match.arg(effects)
   assert_that(is.logical(exponentiate))
   assert_that(is.logical(conf.int))
@@ -305,8 +307,16 @@ tidy.sdmTMB <- function(x, effects = c("fixed", "ran_pars", "ran_vals"), model =
     return(frm(out))
   } else if (effects == "ran_vals") {
     return(frm(out_ranef))
-  } else {
+  } else if (effects == "ran_pars") {
+    if (!silent) {
+      if (!conf.int)
+        cli_inform("Standard errors intentionally omitted because they have been calculated in log space. Confidence intervals are available with `conf.int = TRUE`.")
+      else
+        cli_inform("Standard errors intentionally omitted because they have been calculated in log space.")
+    }
     return(frm(out_re))
+  } else {
+    cli_abort("The specified 'effects' type is not available.")
   }
 }
 

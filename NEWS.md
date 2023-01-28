@@ -1,5 +1,49 @@
-# sdmTMB
+# sdmTMB 0.3.0
 
+* Create the sdmTMBextra package to remove rstan/tmbstan helpers, which
+  were causing memory sanitizer errors on CRAN.
+  https://github.com/pbs-assess/sdmTMBextra
+  
+* The following functions are affected:
+
+  - `predict.sdmTMB()` now takes `mcmc_samples`, which is output from
+    `sdmTMBextra::extract_mcmc()`.
+  - `simulate.sdmTMB()` now takes `mcmc_samples`, which is output from
+    `sdmTMBextra::extract_mcmc()`.
+  - `residuals.sdmTMB()` now takes `mcmc_samples`, which is output
+    `sdmTMBextra::predict_mle_mcmc()`. This only affects 
+    `residuals(..., type = "mle-mcmc")`.
+
+* Move `dharma_residuals()` to 
+  [sdmTMBextra](https://github.com/pbs-assess/sdmTMBextra) to reduce heavy
+  dependencies.
+  
+* See examples in the Bayesian and residuals vignettes or in the help files for
+  those functions within sdmTMBextra.
+
+# sdmTMB 0.2.2
+
+* Various fixes to pass CRAN checks. #158
+
+* Fix memory issue highlighted by Additional issues CRAN checks. #158
+
+* 'offset' argument can now be a character value indicating a column name. This
+  is the preferred way of using an offset with parallel cross validation. #165
+
+* Fix parallel cross validation when using an offset vector. #165
+
+* Add leave-future-out cross validation functionality. #156
+
+* Example data `qcs_grid` is no longer replicated by year to save package
+  space. #158
+
+* Add message with `tidy(fit, "ran_pars")` about why SEs are NA.
+
+* Add anisotropy to `print()` #157
+
+* Fix `predict(..., type = "response", se_fit = TRUE)`, which involves issuing
+  a warning and sticking to link space. #140
+  
 # sdmTMB 0.2.1
 
 * Fixes for resubmission to CRAN.

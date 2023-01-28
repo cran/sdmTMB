@@ -95,8 +95,9 @@ test_that("A spatially varying coefficient model fits", {
     mesh = pcod_spde, family = tweedie(link = "log"),
     spatial_varying = ~ 0 + scaled_year, time = "year")
   expect_true(all(!is.na(summary(m$sd_report)[,"Std. Error"])))
-  qcs_grid$scaled_year <- scale(qcs_grid$year)
-  p <- predict(m, newdata = subset(qcs_grid, year >= 2011))
+  nd <- replicate_df(qcs_grid, "year", unique(pcod$year))
+  nd$scaled_year <- scale(nd$year)
+  p <- predict(m, newdata = subset(nd, year >= 2011))
 })
 
 
@@ -325,8 +326,9 @@ test_that("Multiple SVC works", {
   s <- as.list(fit$sd_report, "Std. Error")
   expect_true(sum(is.na(s$b_j)) == 0L)
   fit
-  qcs_grid$syear <- as.numeric(scale(qcs_grid$year))
-  p <- predict(fit, newdata = qcs_grid)
+  nd <- replicate_df(qcs_grid, "year", unique(pcod$year))
+  nd$syear <- as.numeric(scale(nd$year))
+  p <- predict(fit, newdata = nd)
   # p <- predict(fit, newdata = NULL)
 })
 
@@ -350,14 +352,14 @@ test_that("More esoteric prediction options work", {
   head(p)
   p <- predict(fit, nsim = 5, model = 1)
   head(p)
-  p <- predict(fit, nsim = 5, model = 1, type = "response")
-  head(p)
-  expect_true(all(p <= 1 & p >= 0))
+  # p <- predict(fit, nsim = 5, model = 1, type = "response")
+  # head(p)
+  # expect_true(all(p <= 1 & p >= 0))
   p <- predict(fit, nsim = 5, model = 2)
   head(p)
-  p <- predict(fit, nsim = 5, model = 2, type = "response")
-  head(p)
-  expect_true(all(p > 0))
+  # p <- predict(fit, nsim = 5, model = 2, type = "response")
+  # head(p)
+  # expect_true(all(p > 0))
 
   p <- predict(fit,
     nsim = 5, model = 2,
@@ -371,9 +373,9 @@ test_that("More esoteric prediction options work", {
     family = tweedie()
   )
   p <- predict(fit, nsim = 5)
-  p <- predict(fit, nsim = 5, type = "response")
-  head(p)
-  expect_true(all(p > 0))
+  # p <- predict(fit, nsim = 5, type = "response")
+  # head(p)
+  # expect_true(all(p > 0))
 })
 
 test_that("update() works", {
@@ -442,4 +444,80 @@ test_that("offset() throws an error", {
       family = tweedie(link = "log")
     )
   }, regexp = "offset")
+})
+
+test_that("sdmTMB throws error on AR1/RW with non-numeric time", {
+  skip_on_cran()
+  skip_if_not_installed("INLA")
+
+  pcod_2011$fyear <- as.factor(pcod_2011$year)
+  fit <- sdmTMB(present ~ 1, family = binomial(), spatial = 'off',
+    time = "fyear", spatiotemporal = "iid", data = pcod_2011,
+    mesh = pcod_mesh_2011)
+  expect_true(inherits(fit, "sdmTMB"))
+
+  expect_error(
+    fit <- sdmTMB(present ~ 1, family = binomial(), spatial = 'off',
+      time = "fyear", spatiotemporal = "ar1", data = pcod_2011,
+      mesh = pcod_mesh_2011), regexp = "Time"
+  )
+
+  expect_error(
+    fit <- sdmTMB(present ~ 1, family = binomial(), spatial = 'off',
+      time = "fyear", spatiotemporal = "rw", data = pcod_2011,
+      mesh = pcod_mesh_2011), regexp = "Time"
+  )
+
+  pcod_2011$cyear <- as.character(pcod_2011$year)
+  fit <- sdmTMB(present ~ 1, family = binomial(), spatial = 'off',
+    time = "cyear", spatiotemporal = "iid", data = pcod_2011,
+    mesh = pcod_mesh_2011)
+  expect_true(inherits(fit, "sdmTMB"))
+
+  expect_error(
+    fit <- sdmTMB(present ~ 1, family = binomial(), spatial = 'off',
+      time = "cyear", spatiotemporal = "ar1", data = pcod_2011,
+      mesh = pcod_mesh_2011), regexp = "Time"
+  )
+
+  expect_error(
+    fit <- sdmTMB(present ~ 1, family = binomial(), spatial = 'off',
+      time = "cyear", spatiotemporal = "rw", data = pcod_2011,
+      mesh = pcod_mesh_2011), regexp = "Time"
+  )
+
+  fit <- sdmTMB(
+    present ~ 0 + depth,
+    family = binomial(),
+    spatial = 'off',
+    time_varying = ~ 1,
+    time = "year",
+    data = pcod_2011,
+    spatiotemporal = "off",
+    mesh = pcod_mesh_2011
+  )
+
+  expect_error(
+    fit <- sdmTMB(
+      present ~ 0,
+      family = binomial(),
+      spatial = 'off',
+      time_varying = ~ 1,
+      time = "fyear",
+      data = pcod_2011,
+      spatiotemporal = "off",
+      mesh = pcod_mesh_2011
+    ))
+
+  expect_error(
+    fit <- sdmTMB(
+      present ~ 0,
+      family = binomial(),
+      spatial = 'off',
+      time_varying = ~ 1,
+      time = "cyear",
+      data = pcod_2011,
+      spatiotemporal = "off",
+      mesh = pcod_mesh_2011
+    ))
 })

@@ -115,9 +115,10 @@ to sum to one and are not internally modified. Can also be used for trials
 with the binomial family; the \code{weights} argument needs to be a vector and not
 a name of the variable in the data frame. See the Details section below.}
 
-\item{offset}{A numeric vector representing the model offset. In delta/hurdle
-models, this applies only to the positive component. Usually a log
-transformed variable. The \code{offset} argument needs to be a vector and not a name of the variable in the data frame.}
+\item{offset}{A numeric vector representing the model offset \emph{or} a character
+value representing the column name of the offset. In delta/hurdle models,
+this applies only to the positive component. Usually a log
+transformed variable.}
 
 \item{extra_time}{Optional extra time slices (e.g., years) to include for
 interpolation or forecasting with the predict function. See the Details
@@ -178,7 +179,7 @@ An object (list) of class \code{sdmTMB}. Useful elements include:
 \item \code{gradients}: log likelihood gradients with respect to each fixed effect
 \item \code{model}: output from \code{\link[stats:nlminb]{stats::nlminb()}}
 \item \code{data}: the fitted data
-\item \code{mesh}: the object that was supplied to the \code{mesh} argmument
+\item \code{mesh}: the object that was supplied to the \code{mesh} argument
 \item \code{family}: the family object, which includes the inverse link function as \code{family$linkinv()}
 \item \code{tmb_params}: The parameters list passed to \code{\link[TMB:MakeADFun]{TMB::MakeADFun()}}
 \item \code{tmb_map}: The 'map' list passed to \code{\link[TMB:MakeADFun]{TMB::MakeADFun()}}
@@ -344,8 +345,7 @@ visreg::visreg(fit, xvar = "depth", scale = "response", gg = TRUE, rug = FALSE)
 p <- predict(fit)
 
 # Predict on new data:
-nd <- subset(qcs_grid, year == 2017)
-p <- predict(fit, newdata = nd)
+p <- predict(fit, newdata = qcs_grid)
 head(p)
 
 # Add spatiotemporal random fields:

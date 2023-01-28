@@ -40,19 +40,22 @@
 #'   Defaults to the link-space predictions. Options include: `"omega_s"`,
 #'   `"zeta_s"`, `"epsilon_st"`, and `"est_rf"` (as described below).
 #'   Other options will be passed verbatim.
-#' @param tmbstan_model A model fit with [tmbstan::tmbstan()]. See
-#'   [extract_mcmc()] for more details and an example. If specified, the
-#'   predict function will return a matrix of a similar form as if `nsim > 0`
-#'   but representing Bayesian posterior samples from the Stan model.
-#' @param model Type of prediction if a delta/hurdle model: `NA` returns the
-#'   combined prediction from both components on the link scale for the positive
-#'   component; `1` or `2` return the first or second model component only on
-#'   the link or response scale depending on the argument `type`.
+#' @param tmbstan_model Deprecated. See `mcmc_samples`.
+#' @param mcmc_samples See `extract_mcmc()` in the
+#'   \href{https://github.com/pbs-assess/sdmTMBextra}{sdmTMBextra} package for
+#'   more details and the Bayesian vignette. If specified, the predict function
+#'   will return a matrix of a similar form as if `nsim > 0` but representing
+#'   Bayesian posterior samples from the Stan model.
+#' @param model Type of prediction if a delta/hurdle model *and* `nsim > 0` or
+#'   `mcmc_samples` is supplied: `NA` returns the combined prediction from both
+#'   components on the link scale for the positive component; `1` or `2` return
+#'   the first or second model component only on the link or response scale
+#'   depending on the argument `type`.
 #' @param offset A numeric vector of optional offset values. If left at default
 #'   `NULL`, the offset is implicitly left at 0.
 #' @param return_tmb_report Logical: return the output from the TMB
 #'   report? For regular prediction this is all the reported variables
-#'   at the MLE parameter values. For `nsim > 0` or when `tmbstan_model`
+#'   at the MLE parameter values. For `nsim > 0` or when `mcmc_samples`
 #'   is supplied, this is a list where each element is a sample and the
 #'   contents of each element is the output of the report for that sample.
 #' @param return_tmb_data Logical: return formatted data for TMB? Used
@@ -62,7 +65,7 @@
 #' @param ... Not implemented.
 #'
 #' @return
-#' If `return_tmb_object = FALSE` (and `nsim = 0` and `tmbstan_model = NULL`):
+#' If `return_tmb_object = FALSE` (and `nsim = 0` and `mcmc_samples = NULL`):
 #'
 #' A data frame:
 #' * `est`: Estimate in link space (everything is in link space)
@@ -73,7 +76,7 @@
 #' * `epsilon_st`: Spatiotemporal (intercept) random fields, could be
 #'    off (zero), IID, AR1, or random walk
 #'
-#' If `return_tmb_object = TRUE` (and `nsim = 0` and `tmbstan_model = NULL`):
+#' If `return_tmb_object = TRUE` (and `nsim = 0` and `mcmc_samples = NULL`):
 #'
 #' A list:
 #' * `data`: The data frame described above
@@ -84,7 +87,7 @@
 #' In this case, you likely only need the `data` element as an end user.
 #' The other elements are included for other functions.
 #'
-#' If `nsim > 0` or `tmbstan_model` is not `NULL`:
+#' If `nsim > 0` or `mcmc_samples` is not `NULL`:
 #'
 #' A matrix:
 #'
@@ -117,7 +120,7 @@
 #'
 #' # Predictions onto new data --------------------------------------------
 #'
-#' qcs_grid_2011 <- subset(qcs_grid, year >= min(pcod_2011$year))
+#' qcs_grid_2011 <- replicate_df(qcs_grid, "year", unique(pcod_2011$year))
 #' predictions <- predict(m, newdata = qcs_grid_2011)
 #'
 #' # A short function for plotting our predictions:
@@ -215,7 +218,7 @@
 #' m <- sdmTMB(data = d, formula = density ~ depth_scaled + depth_scaled2,
 #'   mesh = mesh, family = tweedie(link = "log"),
 #'   spatial_varying = ~ 0 + year_scaled, time = "year", spatiotemporal = "off")
-#' nd <- qcs_grid
+#' nd <- replicate_df(qcs_grid, "year", unique(pcod$year))
 #' nd$year_scaled <- (nd$year - mean(d$year)) / sd(d$year)
 #' p <- predict(m, newdata = nd)
 #'
@@ -244,7 +247,8 @@ predict.sdmTMB <- function(object, newdata = object$data,
   sims_var = "est",
   model = c(NA, 1, 2),
   offset = NULL,
-  tmbstan_model = NULL,
+  tmbstan_model = deprecated(),
+  mcmc_samples = NULL,
   return_tmb_object = FALSE,
   return_tmb_report = FALSE,
   return_tmb_data = FALSE,
@@ -266,6 +270,10 @@ predict.sdmTMB <- function(object, newdata = object$data,
     xy_cols <- object$spde$xy_cols
   }
 
+  if (is_present(tmbstan_model)) {
+    deprecate_stop("0.2.2", "predict.sdmTMB(tmbstan_model)", "predict.sdmTMB(mcmc_samples)")
+  }
+
   if (is_present(area)) {
     deprecate_stop("0.0.22", "predict.sdmTMB(area)", "get_index(area)")
   } else {
@@ -278,12 +286,10 @@ predict.sdmTMB <- function(object, newdata = object$data,
     sims <- nsim
   }
 
-
   assert_that(model[[1]] %in% c(NA, 1, 2),
     msg = "`model` argument not valid; should be one of NA, 1, 2")
   model <- model[[1]]
   type <- match.arg(type)
-
   # FIXME parallel setup here?
 
   sys_calls <- unlist(lapply(sys.calls(), deparse)) # retrieve function that called this
@@ -332,9 +338,10 @@ predict.sdmTMB <- function(object, newdata = object$data,
       )
 
     if (!identical(new_data_time, original_time) & isFALSE(pop_pred)) {
-      if (isTRUE(return_tmb_object) || nsim > 0)
+      if (isTRUE(return_tmb_object) || nsim > 0) {
         cli_warn(c("The time elements in `newdata` are not identical to those in the original dataset.",
           "This is normally fine, but may create problems for index standardization."))
+      }
       missing_time <- original_time[!original_time %in% new_data_time]
       fake_nd_list <- list()
       fake_nd <- newdata[1L,,drop=FALSE]
@@ -502,7 +509,7 @@ predict.sdmTMB <- function(object, newdata = object$data,
     # need to initialize the new TMB object once:
     new_tmb_obj$fn(old_par)
 
-    if (sims > 0 && is.null(tmbstan_model)) {
+    if (sims > 0 && is.null(mcmc_samples)) {
       if (!"jointPrecision" %in% names(object$sd_report) && !has_no_random_effects(object)) {
         message("Rerunning TMB::sdreport() with `getJointPrecision = TRUE`.")
         sd_report <- TMB::sdreport(object$tmb_obj, getJointPrecision = TRUE)
@@ -519,10 +526,8 @@ predict.sdmTMB <- function(object, newdata = object$data,
       }
       r <- apply(t_draws, 2L, new_tmb_obj$report)
     }
-    if (!is.null(tmbstan_model)) {
-      if (!"stanfit" %in% class(tmbstan_model))
-        cli_abort("`tmbstan_model` must be output from `tmbstan::tmbstan()`.")
-      t_draws <- extract_mcmc(tmbstan_model)
+    if (!is.null(mcmc_samples)) {
+      t_draws <- mcmc_samples
       if (nsim > 0) {
         if (nsim > ncol(t_draws)) {
           cli_abort("`nsim` must be <= number of MCMC samples.")
@@ -532,7 +537,7 @@ predict.sdmTMB <- function(object, newdata = object$data,
       }
       r <- apply(t_draws, 2L, new_tmb_obj$report)
     }
-    if (!is.null(tmbstan_model) || sims > 0) {
+    if (!is.null(mcmc_samples) || sims > 0) {
       if (return_tmb_report) return(r)
       .var <-  switch(sims_var,
         "est" = "proj_eta",
@@ -641,7 +646,7 @@ predict.sdmTMB <- function(object, newdata = object$data,
         }
         nd$epsilon_st1 <- r$proj_epsilon_st_A_vec[,1]
         nd$epsilon_st2 <- r$proj_epsilon_st_A_vec[,2]
-        if (type == "response") {
+        if (type == "response" && !se_fit) {
           nd$est1 <- object$family[[1]]$linkinv(nd$est1)
           nd$est2 <- object$family[[2]]$linkinv(nd$est2)
           if (object$tmb_data$poisson_link_delta) {
@@ -699,6 +704,14 @@ predict.sdmTMB <- function(object, newdata = object$data,
       se <- se[,model,drop=TRUE]
       nd$est <- proj_eta
       nd$est_se <- se
+    }
+    if (type == "response" && se_fit) {
+      est_name <- if (isTRUE(object$family$delta)) "'est1' and 'est2'" else "'est'"
+      msg <- paste0("predict(..., type = 'response', se_fit = TRUE) detected; ",
+        "returning the prediction ", est_name, " in link space because the standard errors ",
+        "are calculated in link space.")
+      cli_warn(msg)
+      type <- "link"
     }
 
     if (pop_pred) {

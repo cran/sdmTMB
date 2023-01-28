@@ -1,7 +1,7 @@
 Type: Package
 Package: sdmTMB
 Title: Spatial and Spatiotemporal SPDE-Based GLMMs with 'TMB'
-Version: 0.2.1
+Version: 0.3.0
 Authors@R: c(
     person(c("Sean", "C."), "Anderson", , "sean@seananderson.ca",
            role = c("aut", "cre"),
@@ -62,10 +62,9 @@ Depends: R (>= 3.5.0)
 Imports: assertthat, clisymbols, cli, fishMod, generics, glmmTMB,
         graphics, lifecycle, Matrix, methods, mgcv, mvtnorm, nlme,
         rlang, stats, TMB (>= 1.8.0)
-Suggests: bayesplot, DHARMa, dplyr, effects (>= 4.0-1), estimability,
-        emmeans (>= 1.4), future.apply, ggeffects, ggforce, ggplot2,
-        INLA, knitr, rgdal, rmarkdown, rstan, sf, splancs, testthat,
-        tibble, tmbstan, visreg
+Suggests: dplyr, effects (>= 4.0-1), estimability, emmeans (>= 1.4),
+        future, future.apply, ggeffects, ggforce, ggplot2, INLA, knitr,
+        lme4, rgdal, rmarkdown, sf, splancs, testthat, tibble, visreg
 LinkingTo: RcppEigen, TMB
 VignetteBuilder: knitr
 Additional_repositories: https://inla.r-inla-download.org/R/stable
@@ -75,9 +74,9 @@ Config/testthat/parallel: true
 Encoding: UTF-8
 LazyData: true
 RoxygenNote: 7.2.3
-SystemRequirements: GNU make, C++11
+SystemRequirements: GNU make, C++17
 NeedsCompilation: yes
-Packaged: 2023-01-09 19:51:19 UTC; seananderson
+Packaged: 2023-01-27 18:06:23 UTC; seananderson
 Author: Sean C. Anderson [aut, cre] (<https://orcid.org/0000-0001-9563-1937>),
   Eric J. Ward [aut] (<https://orcid.org/0000-0002-4359-0296>),
   Lewis A. K. Barnett [aut] (<https://orcid.org/0000-0002-9381-8375>),
@@ -110,4 +109,4 @@ Author: Sean C. Anderson [aut, cre] (<https://orcid.org/0000-0001-9563-1937>),
     of the Department of Fisheries and Oceans [cph]
 Maintainer: Sean C. Anderson <sean@seananderson.ca>
 Repository: CRAN
-Date/Publication: 2023-01-10 18:50:02 UTC
+Date/Publication: 2023-01-28 07:30:02 UTC
