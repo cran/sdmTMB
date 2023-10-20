@@ -5,6 +5,57 @@ bool isNA(Type x) {
 }
 
 template <class Type>
+Type ppois_log(Type x, Type lambda) {
+  return atomic::Rmath::Rf_ppois(asDouble(x), asDouble(lambda), true, true);
+}
+
+template <class Type>
+Type dcenspois_right(Type x, Type lambda, int give_log = 0) {
+  Type ll;
+  ll = ppois_log(x-Type(1.0), lambda); // F(lower-1)
+  ll = logspace_sub(Type(0.0), ll); // 1 - F(lower-1)
+  if (give_log)
+    return ll;
+  else
+    return exp(ll);
+}
+
+template <class Type>
+Type dcenspois_right_truncated(Type x, Type lambda, Type upr, int give_log = 0) {
+  Type ll;
+  ll = ppois_log(upr, lambda); // F(upr)
+  if (x > Type(0.0)) {
+    Type temp = ppois_log(x-Type(1.0), lambda);
+    ll = logspace_sub(ll, temp); // F(upr) - F(lwr-1) iff x>0
+  }
+  if (give_log)
+    return ll;
+  else
+    return exp(ll);
+}
+
+template <class Type>
+Type dcenspois2(Type x, Type lambda, Type upr, int give_log = 0) {
+  Type ll;
+  if (isNA(upr)) { // full right censored
+    if (x == Type(0.0)) {
+      ll = Type(0.0);
+    } else {
+      ll = dcenspois_right(x, lambda, true);
+    }
+  } else if (upr > x) { // upper truncated right censored
+    ll = dcenspois_right_truncated(x, lambda, upr, true);
+  } else if (x == upr) { // not censored
+    ll = dpois(Type(x), lambda, true);
+  }
+  if (give_log) {
+    return ll;
+  } else {
+    return exp(ll);
+  }
+}
+
+template <class Type>
 Type dcenspois(Type x, Type lambda, Type lwr, Type upr, int give_log = 0)
 {
   // Should not do the obvious route due to numerical issues
@@ -12,19 +63,20 @@ Type dcenspois(Type x, Type lambda, Type lwr, Type upr, int give_log = 0)
   Type tmp_ll;
   if (lwr == upr) {  // no censorship
     tmp_ll = dpois(Type(lwr), lambda, true);
-  }
-  if (isNA(upr)) {  // right censored
-    if (lwr == Type(0)) {
-      tmp_ll = 0.0;
-    }
-    if (lwr > Type(0)) {
-      tmp_ll = log(ppois(Type(lwr-1.0), lambda)); // F(lower-1)
-      tmp_ll = logspace_sub(Type(0), tmp_ll);  // 1 - F(lower-1)
-    }
   } else {
-    tmp_ll = log(ppois(Type(upr), lambda)); // F(upr)
-    if (lwr > Type(0)) {
-      tmp_ll = logspace_sub(tmp_ll, log(ppois(Type(lwr-1.0), lambda))); // F(upr) - F(lwr-1) iff lwr>0
+    if (isNA(upr)) {  // right censored
+      if (lwr == Type(0)) {
+        tmp_ll = 0.0;
+      }
+      if (lwr > Type(0)) {
+        tmp_ll = log(ppois(Type(lwr-1.0), lambda)); // F(lower-1)
+        tmp_ll = logspace_sub(Type(0), tmp_ll);  // 1 - F(lower-1)
+      }
+    } else { // right censored with upper limit
+      tmp_ll = log(ppois(Type(upr), lambda)); // F(upr)
+      if (lwr > Type(0)) {
+        tmp_ll = logspace_sub(tmp_ll, log(ppois(Type(lwr-1.0), lambda))); // F(upr) - F(lwr-1) iff lwr>0
+      }
     }
   }
   if (give_log)
@@ -113,6 +165,13 @@ Eigen::SparseMatrix<Type> Q_spde(spde_barrier_t<Type> spde, Type kappa,
 template <class Type>
 Type minus_one_to_one(Type x) {
   return Type(2) * invlogit(x) - Type(1);
+}
+
+template <class Type>
+Type log_sum_exp(Type x1, Type x2) {
+  Type xmax = x1;
+  if (x2 > x1) xmax = x2;
+  return xmax + log(exp(x1 - xmax) + exp(x2 - xmax));
 }
 
 template <class Type>

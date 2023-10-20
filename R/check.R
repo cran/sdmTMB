@@ -2,8 +2,8 @@
 #'
 #' @param object Fitted model from [sdmTMB()].
 #' @param big_sd_log10 Value to check size of standard errors against. A value
-#'   of 3 would indicate that standard errors greater than `10^3` should be
-#'   flagged.
+#'   of 2 would indicate that standard errors greater than `10^2` (i.e., 100)
+#'   should be flagged.
 #' @param gradient_thresh Gradient threshold to issue warning.
 #'
 #' @return An invisible named list of checks.
@@ -14,7 +14,7 @@
 #' return `FALSE`. This is to facilitate using `sanity()` on models with [try()]
 #' or [tryCatch()]. See the examples section.
 #'
-#' @examplesIf inla_installed()
+#' @examples
 #' fit <- sdmTMB(
 #'   present ~ s(depth),
 #'   data = pcod_2011, mesh = pcod_mesh_2011,
@@ -34,7 +34,7 @@
 #' all(unlist(s))
 #' all(unlist(s2))
 
-sanity <- function(object, big_sd_log10 = 3, gradient_thresh = 0.001) {
+sanity <- function(object, big_sd_log10 = 2, gradient_thresh = 0.001) {
 
   # make it easy to use output from try()
   if (length(object) <= 1L) {
@@ -90,9 +90,7 @@ sanity <- function(object, big_sd_log10 = 3, gradient_thresh = 0.001) {
         "`", np[i],
         paste0("` gradient > ", gradient_thresh)
       ))
-      msg <- "See `?run_extra_optimization()`"
-      cli::cli_alert_info(msg)
-      msg <- "Or refit with `control = sdmTMBcontrol(newton_loops = 1)`"
+      msg <- "See ?run_extra_optimization(), standardize covariates, and/or simplify the model"
       cli::cli_alert_info(msg)
       cat("\n")
     }

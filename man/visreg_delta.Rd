@@ -32,20 +32,16 @@ Note the residuals are currently randomized quantile residuals,
 \emph{not} deviance residuals as is usual for GLMs with \pkg{visreg}.
 }
 \examples{
-if (inla_installed() &&
-  require("ggplot2", quietly = TRUE) &&
+if (require("ggplot2", quietly = TRUE) &&
   require("visreg", quietly = TRUE)) {
 
-  pcod_2011$fyear <- as.factor(pcod_2011$year)
   fit <- sdmTMB(
-    density ~ s(depth_scaled) + fyear,
+    density ~ s(depth_scaled),
     data = pcod_2011, mesh = pcod_mesh_2011,
     spatial = "off",
     family = tweedie()
   )
   visreg::visreg(fit, xvar = "depth_scaled")
-  visreg::visreg(fit, xvar = "fyear")
-  visreg::visreg2d(fit, xvar = "fyear", yvar = "depth_scaled")
 
   \donttest{
   visreg::visreg(fit, xvar = "depth_scaled", scale = "response")

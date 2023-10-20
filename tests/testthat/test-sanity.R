@@ -1,6 +1,5 @@
 test_that("sanity() runs", {
   skip_on_cran()
-  skip_if_not_installed("INLA")
 
   fit <- sdmTMB(density ~ 1, time = "year",
     data = pcod_2011, mesh = pcod_mesh_2011,
@@ -10,7 +9,7 @@ test_that("sanity() runs", {
   expect_true(all(unlist(s)))
 
   fit$gradients[1] <- 0.9
-  expect_message(sanity(fit), regexp = "newton")
+  expect_message(sanity(fit), regexp = "gradient")
 
   fit$gradients[1] <- 0.00001
   fit$bad_eig <- TRUE
@@ -34,9 +33,11 @@ test_that("sanity() runs", {
 
   set.seed(1)
   pcod_2011$depth_fake <- pcod_2011$depth + runif(nrow(pcod_2011), -0.0001, 0.0001)
-  fit <- sdmTMB(density ~ depth + depth_fake,
-    data = pcod_2011, mesh = pcod_mesh_2011, spatial = "off",
-    family = delta_gamma()
+  suppressWarnings(
+    fit <- sdmTMB(density ~ depth + depth_fake,
+      data = pcod_2011, mesh = pcod_mesh_2011, spatial = "off",
+      family = delta_gamma()
+    )
   )
   expect_message(s <- sanity(fit), regexp = "may be large")
   # expect_message(s <- sanity(fit, se_ratio = 2), regexp = "2x")

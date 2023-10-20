@@ -4,14 +4,14 @@
 \alias{sanity}
 \title{Sanity check of an sdmTMB model}
 \usage{
-sanity(object, big_sd_log10 = 3, gradient_thresh = 0.001)
+sanity(object, big_sd_log10 = 2, gradient_thresh = 0.001)
 }
 \arguments{
 \item{object}{Fitted model from \code{\link[=sdmTMB]{sdmTMB()}}.}
 
 \item{big_sd_log10}{Value to check size of standard errors against. A value
-of 3 would indicate that standard errors greater than \code{10^3} should be
-flagged.}
+of 2 would indicate that standard errors greater than \code{10^2} (i.e., 100)
+should be flagged.}
 
 \item{gradient_thresh}{Gradient threshold to issue warning.}
 }
@@ -27,7 +27,6 @@ return \code{FALSE}. This is to facilitate using \code{sanity()} on models with 
 or \code{\link[=tryCatch]{tryCatch()}}. See the examples section.
 }
 \examples{
-\dontshow{if (inla_installed()) (if (getRversion() >= "3.4") withAutoprint else force)(\{ # examplesIf}
 fit <- sdmTMB(
   present ~ s(depth),
   data = pcod_2011, mesh = pcod_mesh_2011,
@@ -46,5 +45,4 @@ failed_fit <- try(stop())
 s2 <- sanity(failed_fit)
 all(unlist(s))
 all(unlist(s2))
-\dontshow{\}) # examplesIf}
 }

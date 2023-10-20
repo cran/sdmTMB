@@ -6,7 +6,6 @@ if (suppressWarnings(require("INLA", quietly = TRUE))) {
 
   test_that("Delta-Gamma family fits", {
     skip_on_cran()
-    skip_if_not_installed("INLA")
 
     fit_dg <- sdmTMB(density ~ 1,
       data = pcod, mesh = pcod_spde,
@@ -16,9 +15,15 @@ if (suppressWarnings(require("INLA", quietly = TRUE))) {
     fit_dg$sd_report
     nd <- replicate_df(qcs_grid, "year", unique(pcod$year))
     p <- predict(fit_dg, newdata = nd)
-    # head(p)
-    # p <- predict(fit_dg, newdata = nd, type = "response")
-    # head(p)
+
+    expect_equal(
+      round(tidy(fit_dg, "ran_pars", model = 1)$estimate, 3),
+      c(39.334, 2.289, 0.808)
+    )
+    expect_equal(
+      round(tidy(fit_dg, "ran_pars", model = 2)$estimate, 3),
+      c(16.224, 0.992, 0.656, 1.426)
+    )
 
     p <- predict(fit_dg, newdata = nd, return_tmb_object = TRUE)
     ind_dg <- get_index(p, bias_correct = FALSE)
@@ -48,7 +53,6 @@ if (suppressWarnings(require("INLA", quietly = TRUE))) {
 
   test_that("Delta-lognormal family fits", {
     skip_on_cran()
-    skip_if_not_installed("INLA")
 
     fit_dln <- sdmTMB(density ~ 1,
       data = pcod, mesh = pcod_spde,
@@ -61,7 +65,6 @@ if (suppressWarnings(require("INLA", quietly = TRUE))) {
 
   test_that("delta_poisson_link_gamma() family fits", {
     skip_on_cran()
-    skip_if_not_installed("INLA")
 
     fit_plg <- sdmTMB(density ~ 1,
       data = pcod, mesh = pcod_spde,
@@ -79,7 +82,6 @@ if (suppressWarnings(require("INLA", quietly = TRUE))) {
 
   test_that("delta_poisson_link_lognormal() family fits", {
     skip_on_cran()
-    skip_if_not_installed("INLA")
 
     fit_plg <- sdmTMB(density ~ 1,
       data = pcod, mesh = pcod_spde,
@@ -94,7 +96,6 @@ if (suppressWarnings(require("INLA", quietly = TRUE))) {
   test_that("delta_truncated_nbinom2 family fits", {
     skip_on_cran()
     skip_on_ci()
-    skip_if_not_installed("INLA")
 
     pcod$count <- round(pcod$density)
     fit_dtnb2 <- sdmTMB(count ~ 1,
@@ -110,7 +111,6 @@ if (suppressWarnings(require("INLA", quietly = TRUE))) {
   test_that("delta_truncated_nbinom1 family fits", {
     skip_on_cran()
     skip_on_ci()
-    skip_if_not_installed("INLA")
 
     pcod$count <- round(pcod$density)
     fit_dtnb1 <- sdmTMB(count ~ 1,
@@ -124,7 +124,6 @@ if (suppressWarnings(require("INLA", quietly = TRUE))) {
 
   test_that("Anisotropy with delta model", {
     skip_on_cran()
-    skip_if_not_installed("INLA")
 
     suppressWarnings({
       fit_dg <- sdmTMB(density ~ 1,

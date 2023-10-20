@@ -14,7 +14,8 @@ sdmTMBpriors(
   phi = halfnormal(NA, NA),
   ar1_rho = normal(NA, NA),
   tweedie_p = normal(NA, NA),
-  b = normal(NA, NA)
+  b = normal(NA, NA),
+  sigma_G = halfnormal(NA, NA)
 )
 
 normal(location = 0, scale = 1)
@@ -44,6 +45,8 @@ the parameter has support \verb{-1 < ar1_rho < 1}.}
 parameter has support \verb{1 < tweedie_p < 2} so choose a mean appropriately.}
 
 \item{b}{\code{normal()} priors for the main population-level 'beta' effects.}
+
+\item{sigma_G}{\code{halfnormal()} priors for the random intercept SDs.}
 
 \item{location}{Location parameter(s).}
 
@@ -94,7 +97,7 @@ the argument names in \code{pc_matern()}):
 credible intervals when the prior satisfies \code{P(sigma > sigma_lt) = 0.05} and
 \code{P(range < range_gt) = 0.05}, where \code{sigma_lt} is between 2.5 to 40 times
 the true marginal standard deviation and \code{range_gt} is between 1/10 and 1/2.5
-of the true range." Also see \code{\link[INLA:inla.spde2.pcmatern]{INLA::inla.spde2.pcmatern()}}.
+of the true range."
 
 Keep in mind that the range is dependent on the units and scale of the
 coordinate system. In practice, you may choose to try fitting the model
@@ -110,8 +113,7 @@ mvnormal(c(0, 0))
 pc_matern(range_gt = 5, sigma_lt = 1)
 plot_pc_matern(range_gt = 5, sigma_lt = 1)
 
-if (inla_installed()) {
-
+\donttest{
 d <- subset(pcod, year > 2011)
 pcod_spde <- make_mesh(d, c("X", "Y"), cutoff = 30)
 
@@ -155,7 +157,6 @@ m <- sdmTMB(density ~ 0 + depth_scaled + depth_scaled2 + as.factor(year),
     matern_s = pc_matern(range_gt = 5, sigma_lt = 1),
     matern_st = pc_matern(range_gt = 5, sigma_lt = 1))
 )
-
 }
 }
 \references{

@@ -20,7 +20,6 @@
 test_that("randomized quantile residuals work,", {
   skip_on_cran()
   skip_on_ci()
-  skip_if_not_installed("INLA")
 
   set.seed(1)
   predictor_dat <- data.frame(X = runif(2000), Y = runif(2000))
@@ -183,7 +182,6 @@ test_that("randomized quantile residuals work,", {
 
 test_that("residuals() works", {
   skip_on_cran()
-  skip_if_not_installed("INLA")
   pcod_spde <- make_mesh(pcod, c("X", "Y"), cutoff = 15)
   # fit <- sdmTMB(density ~ 1, spatial = "off",
   #   data = pcod, mesh = pcod_spde,
@@ -283,3 +281,56 @@ test_that("Pearson residuals work", {
   # expect_equal(as.numeric(r), as.numeric(r1))
 })
 
+test_that("MCMC residuals throw error as needed", {
+  skip_on_cran()
+  fit_dg <- sdmTMB(
+    density ~ 1,
+    data = pcod_2011,
+    mesh = pcod_mesh_2011,
+    family = delta_gamma()
+  )
+  expect_error({
+    r <- residuals(fit_dg, type = "mle-mcmc", mcmc_iter = 101, mcmc_warmup = 100)
+  }, regexp = "mcmc")
+})
+
+# test_that("MCMC residuals work with sdmTMBextra", {
+#   skip_on_cran()
+#   skip_if_not_installed("INLA")
+#   skip_if_not_installed("sdmTMBextra")
+#   skip_if_not_installed("rstan")
+#   d <- pcod_2011
+#   set.seed(1)
+#   d$offset <- rnorm(nrow(d))
+#   fit_dg <- sdmTMB(
+#     density ~ 1,
+#     data = d,
+#     mesh = pcod_mesh_2011,
+#     offset = d$offset,
+#     family = delta_gamma()
+#   )
+#   set.seed(1)
+#   p0 <- sdmTMBextra::predict_mle_mcmc(fit_dg, mcmc_iter = 11, mcmc_warmup = 10)
+#   set.seed(1)
+#   p1 <- sdmTMBextra::predict_mle_mcmc(fit_dg,
+#     mcmc_iter = 11, mcmc_warmup = 10,
+#     model = 1
+#   )
+#   set.seed(1)
+#   p2 <- sdmTMBextra::predict_mle_mcmc(fit_dg,
+#     mcmc_iter = 11, mcmc_warmup = 10,
+#     model = 2
+#   )
+#   expect_equal(p0, p1)
+#   set.seed(1)
+#   r1 <- residuals(fit_dg, type = "mle-mcmc", mcmc_samples = p1)
+#   set.seed(1)
+#   r2 <- residuals(fit_dg, type = "mle-mcmc", mcmc_samples = p2)
+#   qqnorm(r1)
+#   qqnorm(r2)
+#   expect_false(identical(r1, r2))
+#   expect_true(max(r1) < 5)
+#   expect_true(min(r1) > -5)
+#   expect_true(max(r2) < 5)
+#   expect_true(min(r2) > -5)
+# })

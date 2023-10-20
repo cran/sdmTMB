@@ -22,6 +22,7 @@ qres_binomial <- function(object, y, mu, .n = NULL) {
 
 qres_nbinom2 <- function(object, y, mu, ...) {
   phi <- exp(object$model$par[["ln_phi"]])
+  if (is_delta(object)) phi <- phi[2]
   a <- stats::pnbinom(y - 1, size = phi, mu = mu)
   b <- stats::pnbinom(y, size = phi, mu = mu)
   u <- stats::runif(n = length(y), min = a, max = b)
@@ -44,7 +45,9 @@ qnbinom1 <- function(p, mu, phi) {
 }
 
 qres_nbinom1 <- function(object, y, mu, ...) {
-  phi <- exp(object$model$par[["ln_phi"]])
+  theta <- get_pars(object)
+  phi <- exp(theta[["ln_phi"]])
+  if (is_delta(object)) phi <- phi[2]
   a <- pnbinom1(y - 1, phi = phi, mu = mu)
   b <- pnbinom1(y, phi = phi, mu = mu)
   u <- stats::runif(n = length(y), min = a, max = b)
@@ -58,8 +61,14 @@ qres_pois <- function(object, y, mu, ...) {
   stats::qnorm(u)
 }
 
+is_delta <- function(object) {
+  isTRUE(object$family$delta)
+}
+
 qres_gamma <- function(object, y, mu, ...) {
-  phi <- exp(object$model$par[["ln_phi"]])
+  theta <- get_pars(object)
+  phi <- exp(theta[["ln_phi"]])
+  if (is_delta(object)) phi <- phi[2]
   s1 <- phi
   s2 <- mu / s1
   u <- stats::pgamma(q = y, shape = s1, scale = s2)
@@ -67,32 +76,54 @@ qres_gamma <- function(object, y, mu, ...) {
 }
 
 qres_gamma_mix <- function(object, y, mu, ...) {
-  p_mix <- plogis(object$model$par[["logit_p_mix"]])
-  phi <- exp(object$model$par[["ln_phi"]])
-  ratio <- exp(object$model$par[["log_ratio_mix"]])
-  s1 <- phi
-  s2 <- mu / s1
-  s3 <- ratio * s2
-  u <- stats::pgamma(q = y, shape = s1, scale = (1-p_mix)*s2 + p_mix*s3)
+  cli_abort("Randomized quantile residuals for this family are not implemented yet")
+  # theta <- get_pars(object)
+  # p_mix <- plogis(theta[["logit_p_mix"]])
+  # phi <- exp(theta[["ln_phi"]])
+  # if (is_delta(object)) phi <- phi[2]
+  # ratio <- exp(theta[["log_ratio_mix"]])
+  # s1 <- phi
+  # s2 <- mu / s1
+  # s3 <- (ratio * mu) / s1
+  # u <- stats::pgamma(q = y, shape = s1, scale = (1-p_mix)*s2 + p_mix*s3) # this looks wrong
+  # stats::qnorm(u)
+}
+
+qres_nbinom2_mix <- function(object, y, mu, ...) {
+  cli_abort("Randomized quantile residuals for this family are not implemented yet")
+  theta <- get_pars(object)
+  p_mix <- plogis(theta[["logit_p_mix"]])
+  phi <- exp(theta[["ln_phi"]])
+  if (is_delta(object)) phi <- phi[2]
+  ratio <- exp(theta[["log_ratio_mix"]])
+  a <- stats::pnbinom(y - 1, size = phi, mu = (1-p_mix)*mu + p_mix*ratio*mu)
+  b <- stats::pnbinom(y, size = phi, mu = (1-p_mix)*mu + p_mix*ratio*mu)
+  u <- stats::runif(n = length(y), min = a, max = b)
   stats::qnorm(u)
 }
 
 qres_lognormal_mix <- function(object, y, mu, ...) {
-  p_mix <- plogis(object$model$par[["logit_p_mix"]])
-  dispersion <- exp(object$model$par[["ln_phi"]])
-  ratio <- exp(object$model$par[["log_ratio_mix"]])
+  cli_abort("Randomized quantile residuals for this family are not implemented yet")
+  theta <- get_pars(object)
+  p_mix <- plogis(theta[["logit_p_mix"]])
+  dispersion <- exp(theta[["ln_phi"]])
+  if (is_delta(object)) dispersion <- dispersion[2]
+  ratio <- exp(theta[["log_ratio_mix"]])
   u <- stats::plnorm(q = y, meanlog = log((1-p_mix)*mu + p_mix*ratio*mu) - (dispersion^2) / 2, sdlog = dispersion)
   stats::qnorm(u)
 }
 
 qres_gaussian <- function(object, y, mu, ...) {
-  dispersion <- exp(object$model$par[["ln_phi"]])
+  theta <- get_pars(object)
+  dispersion <- exp(theta[["ln_phi"]])
   u <- stats::pnorm(q = y, mean = mu, sd = dispersion)
   stats::qnorm(u)
 }
 
 qres_lognormal <- function(object, y, mu, ...) {
-  dispersion <- exp(object$model$par[["ln_phi"]])
+  theta <- get_pars(object)
+  dispersion <- exp(theta[["ln_phi"]])
+  if (is_delta(object)) dispersion <- dispersion[2]
   u <- stats::plnorm(q = y, meanlog = log(mu) - (dispersion^2) / 2, sdlog = dispersion)
   stats::qnorm(u)
 }
@@ -101,13 +132,15 @@ qres_lognormal <- function(object, y, mu, ...) {
 pt_ls <- function(q, df, mu, sigma) stats::pt((q - mu) / sigma, df)
 
 qres_student <- function(object, y, mu, ...) {
-  dispersion <- exp(object$model$par[["ln_phi"]])
+  theta <- get_pars(object)
+  dispersion <- exp(theta[["ln_phi"]])
   u <- pt_ls(q = y, df = object$tmb_data$df, mu = mu, sigma = dispersion)
   stats::qnorm(u)
 }
 
 qres_beta <- function(object, y, mu, ...) {
-  phi <- exp(object$model$par[["ln_phi"]])
+  theta <- get_pars(object)
+  phi <- exp(theta[["ln_phi"]])
   s1 <- mu * phi
   s2 <- (1 - mu) * phi
   u <- stats::pbeta(q = y, shape1 = s1, shape2 = s2)
@@ -185,7 +218,6 @@ qres_beta <- function(object, y, mu, ...) {
 #' \doi{10.1007/s10651-017-0372-4}
 #'
 #' @examples
-#' if (inla_installed()) {
 #'
 #'   mesh <- make_mesh(pcod_2011, c("X", "Y"), cutoff = 10)
 #'   fit <- sdmTMB(
@@ -206,7 +238,6 @@ qres_beta <- function(object, y, mu, ...) {
 #'   qqline(r1)
 #'
 #'   # see also "mle-mcmc" residuals with the help of the sdmTMBextra package
-#' }
 
 residuals.sdmTMB <- function(object,
                              type = c("mle-laplace", "mle-mcmc", "mvn-laplace", "response", "pearson"),
@@ -214,6 +245,8 @@ residuals.sdmTMB <- function(object,
                              mcmc_samples = NULL,
                              ...) {
 
+  model_missing <- FALSE
+  if (identical(model, c(1, 2))) model_missing <- TRUE
   model <- as.integer(model[[1]])
   if ("visreg_model" %in% names(object)) {
     model <- object$visreg_model
@@ -255,18 +288,25 @@ residuals.sdmTMB <- function(object,
     lognormal  = qres_lognormal,
     gamma_mix = qres_gamma_mix,
     lognormal_mix = qres_lognormal_mix,
+    nbinom2_mix = qres_nbinom2_mix,
     cli_abort(paste(fam, "not yet supported."))
   )
 
   if (type %in% c("mle-laplace", "response", "pearson")) {
-    mu <- tryCatch({linkinv(predict(object, newdata = nd)[[est_column]])}, # newdata = NULL; fast
-      error = function(e) NA)
-    if (is.na(mu[[1]])) {
-      mu <- linkinv(predict(object, newdata = object$data)[[est_column]]) # not newdata = NULL
-    }
+    # mu <- tryCatch({linkinv(predict(object, newdata = NULL)[[est_column]])}, # newdata = NULL; fast
+    #   error = function(e) NA)
+    # if (is.na(mu[[1]])) {
+    mu <- linkinv(predict(object, newdata = object$data, offset = object$tmb_data$offset_i)[[est_column]]) # not newdata = NULL
+    # }
   } else if (type == "mvn-laplace") {
-    mu <- linkinv(predict(object, nsim = 1L, model = model)[, 1L, drop = TRUE])
+    mu <- linkinv(predict(object, nsim = 1L, model = model, offset = object$tmb_data$offset_i)[, 1L, drop = TRUE])
   } else if (type == "mle-mcmc") {
+    if (is.null(mcmc_samples)) {
+      msg <- c("As of sdmTMB 0.3.0, `mcmc_samples` must be supplied to use `type = 'mle-mcmc'`.",
+        "See ?sdmTMBextra::predict_mle_mcmc after installing",
+        "remotes::install_github('pbs-assess/sdmTMBextra')")
+      cli_abort(msg)
+    }
     mcmc_samples <- as.numeric(mcmc_samples)
     assert_that(length(mcmc_samples) == nrow(object$data))
     mu <- linkinv(mcmc_samples)
@@ -310,6 +350,10 @@ residuals.sdmTMB <- function(object,
     if (!is.null(wts)) r <- r * sqrt(wts)
   } else {
     cli_abort("residual type not implemented")
+  }
+  if (isTRUE(object$family$delta) && is.null(mcmc_samples) && model_missing) {
+    cli_inform(paste0("These are residuals for delta model component ", model,
+      ". Use the `model` argument to select the other component."))
   }
   r
 }

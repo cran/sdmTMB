@@ -28,7 +28,7 @@
 #'
 #' @importFrom assertthat assert_that
 #' @importFrom stats plogis
-#' @examplesIf inla_installed()
+#' @examples
 #' fit <- sdmTMB(density ~ poly(depth_scaled, 2, raw = TRUE),
 #'   data = pcod_2011, mesh = pcod_mesh_2011,
 #'   family = tweedie()
@@ -78,28 +78,33 @@ tidy.sdmTMB <- function(x, effects = c("fixed", "ran_pars", "ran_vals"), model =
   est$zeta_s <- NULL
   est$omega_s <- NULL
   est$ln_H_input <- NULL
-  est$phi <- NULL
 
   se$epsilon_st <- NULL
   se$zeta_s <- NULL
   se$omega_s <- NULL
   se$ln_H_input <- NULL
-  se$phi <- NULL
 
   subset_pars <- function(p, model) {
     p$b_j <- if (model == 1) p$b_j else p$b_j2
     p$ln_tau_O <- p$ln_tau_O[model]
     p$ln_tau_Z <- p$ln_tau_Z[model]
     p$ln_tau_E <- p$ln_tau_E[model]
-    p$ln_kappa <- p$ln_kappa[,model]
+    p$ln_kappa <- as.numeric(p$ln_kappa[,model])
     p$ln_phi <- p$ln_phi[model]
-    p$ln_tau_V <- p$ln_tau_V[,model]
-    p$ar1_phi <- p$ar1_phi[model]
-    p$ln_tau_G <- p$ln_tau_G[,model]
-    p$log_sigma_O <- p$log_sigma_O[model]
-    p$log_sigma_E <- p$log_sigma_E[model]
-    p$log_sigma_Z <- p$log_sigma_Z[,model]
-    p$log_range <- p$log_range[,model]
+    p$ln_tau_V <- as.numeric(p$ln_tau_V[,model])
+    p$ar1_phi <- as.numeric(p$ar1_phi[model])
+    p$ln_tau_G <- as.numeric(p$ln_tau_G[,model])
+    p$log_sigma_O <- as.numeric(p$log_sigma_O[1,model])
+    p$log_sigma_E <- as.numeric(p$log_sigma_E[1,model])
+    p$log_sigma_Z <- as.numeric(p$log_sigma_Z[,model])
+    p$log_range <- as.numeric(p$log_range[,model])
+
+    p$phi <- p$phi[model]
+    p$range <- as.numeric(p$range[,model])
+    p$sigma_E <- as.numeric(p$sigma_E[1,model])
+    p$sigma_O <- as.numeric(p$sigma_O[1,model])
+    p$sigma_Z <- as.numeric(p$sigma_Z[,model])
+    p$sigma_G <- as.numeric(p$sigma_G[,model])
     p
   }
   est <- subset_pars(est, model)
@@ -108,31 +113,14 @@ tidy.sdmTMB <- function(x, effects = c("fixed", "ran_pars", "ran_vals"), model =
   if (x$family$family[[model]] %in% c("binomial", "poisson")) {
     se$ln_phi <- NULL
     est$ln_phi <- NULL
+    se$phi <- NULL
+    est$phi <- NULL
   }
-
-  # not ADREPORTed for speed:
-  optional_assign <- function(est, from, to) {
-    if (from %in% names(est)) est[[to]] <- exp(est[[from]])
-    est
-  }
-  est <- optional_assign(est, "log_sigma_E", "sigma_E")
-  est <- optional_assign(est, "log_sigma_O", "sigma_O")
-  est <- optional_assign(est, "log_sigma_Z", "sigma_Z")
-  est <- optional_assign(est, "log_range", "range")
-  est <- optional_assign(est, "ln_phi", "phi")
-  est <- optional_assign(est, "ln_tau_G", "sigma_G")
-  est <- optional_assign(est, "ln_tau_V", "sigma_V")
 
   ii <- 1
-  if (length(unique(est$sigma_E)) == 1L) {
-    se$sigma_E <- se$sigma_E[1]
-    est$sigma_E <- est$sigma_E[1]
-    se$log_sigma_E <- se$log_sigma_E[1]
-    est$log_sigma_E <- est$log_sigma_E[1]
-  }
 
   # grab fixed effects:
-  .formula <- x$split_formula[[model]]$fixedFormula
+  .formula <- x$split_formula[[model]]$form_no_bars
   .formula <- remove_s_and_t2(.formula)
   if (!"mgcv" %in% names(x)) x[["mgcv"]] <- FALSE
   fe_names <- colnames(model.matrix(.formula, x$data))
@@ -170,7 +158,7 @@ tidy.sdmTMB <- function(x, effects = c("fixed", "ran_pars", "ran_vals"), model =
     log_name <- c(log_name, "ln_phi")
     name <- c(name, "phi")
   }
-  if (x$tmb_data$include_spatial) {
+  if (x$tmb_data$include_spatial[model]) {
     log_name <- c(log_name, "log_sigma_O")
     name <- c(name, "sigma_O")
   }
@@ -195,6 +183,7 @@ tidy.sdmTMB <- function(x, effects = c("fixed", "ran_pars", "ran_vals"), model =
   if (!"log_range" %in% names(est)) {
     cli_warn("This model was fit with an old version of sdmTMB. Some parameters may not be available to the tidy() method. Re-fit the model with the current version of sdmTMB if you need access to any missing parameters.")
   }
+
   for (i in name) {
     j <- j + 1
     if (i %in% names(est)) {
@@ -202,8 +191,15 @@ tidy.sdmTMB <- function(x, effects = c("fixed", "ran_pars", "ran_vals"), model =
       .se <- se[[log_name[j]]]
       .e <- if (is.null(.e)) NA else .e
       .se <- if (is.null(.se)) NA else .se
+
+      non_log_name <- gsub("ln_", "", gsub("log_", "", log_name))
+      this <- non_log_name[j]
+      if (this == "tau_G") this <- "sigma_G"
+      if (this == "tau_V") this <- "sigma_V"
+      this_se <- as.numeric(se[[this]])
+      this_est <- as.numeric(est[[this]])
       out_re[[i]] <- data.frame(
-        term = i, estimate = est[[i]], std.error = NA,
+        term = i, estimate = this_est, std.error = this_se,
         conf.low = exp(.e - crit * .se),
         conf.high = exp(.e + crit * .se),
         stringsAsFactors = FALSE
@@ -211,7 +207,6 @@ tidy.sdmTMB <- function(x, effects = c("fixed", "ran_pars", "ran_vals"), model =
 
       ii <- ii + 1
     }
-    out_re[[i]]$std.error <- NA
   }
   discard <- unlist(lapply(out_re, function(x) length(x) == 1L)) # e.g. old models and phi
   out_re[discard] <- NULL
@@ -219,7 +214,7 @@ tidy.sdmTMB <- function(x, effects = c("fixed", "ran_pars", "ran_vals"), model =
   if ("tweedie" %in% x$family$family) {
     out_re$tweedie_p <- data.frame(
       term = "tweedie_p", estimate = plogis(est$thetaf) + 1,
-      std.error = NA, stringsAsFactors = FALSE)
+      std.error = se$tweedie_p, stringsAsFactors = FALSE)
     out_re$tweedie_p$conf.low <- plogis(est$thetaf - crit * se$thetaf) + 1
     out_re$tweedie_p$conf.high <- plogis(est$thetaf + crit * se$thetaf) + 1
     ii <- ii + 1
@@ -256,7 +251,7 @@ tidy.sdmTMB <- function(x, effects = c("fixed", "ran_pars", "ran_vals"), model =
   }
 
   # random intercepts
-  n_re_int <- length(x$split_formula[[model]]$reTrmFormulas)
+  n_re_int <- x$split_formula[[model]]$n_bars
   if (n_re_int == 0 && effects == "ran_vals") {
     cli::cli_abort("effects = 'ran_vals' currently only works with random intercepts (e.g., `+ (1 | g)`).")
   }
@@ -265,10 +260,9 @@ tidy.sdmTMB <- function(x, effects = c("fixed", "ran_pars", "ran_vals"), model =
     re_est <- as.list(x$sd_report, "Estimate")$RE
     re_ses <- as.list(x$sd_report, "Std. Error")$RE
     for(jj in 1:n_re_int) {
-      # 3rd element below is piece after the bar, e.g. grouping variable
-      level_names <- levels(x$data[[x$split_formula[[model]]$reTrmFormulas[[jj]][[3]]]])
+      level_names <- levels(x$data[[x$split_formula[[model]]$barnames[jj]]])
       n_levels <- length(level_names)
-      re_name <- x$split_formula[[model]]$reTrmFormulas[[jj]][[3]]
+      re_name <- x$split_formula[[model]]$barnames[jj]
 
       if(jj==1) {
         start_pos <- 1
@@ -279,10 +273,10 @@ tidy.sdmTMB <- function(x, effects = c("fixed", "ran_pars", "ran_vals"), model =
       }
       out_ranef[[jj]] <- data.frame(
         term = paste0(re_name,"_",level_names),
-        estimate = re_est[start_pos:end_pos],
-        std.error = re_ses[start_pos:end_pos],
-        conf.low = re_est[start_pos:end_pos] - crit * re_ses[start_pos:end_pos],
-        conf.high = re_est[start_pos:end_pos] + crit * re_ses[start_pos:end_pos],
+        estimate = re_est[start_pos:end_pos,model],
+        std.error = re_ses[start_pos:end_pos,model],
+        conf.low = re_est[start_pos:end_pos,model] - crit * re_ses[start_pos:end_pos,model],
+        conf.high = re_est[start_pos:end_pos,model] + crit * re_ses[start_pos:end_pos,model],
         stringsAsFactors = FALSE
       )
       if (!conf.int) {
@@ -308,12 +302,6 @@ tidy.sdmTMB <- function(x, effects = c("fixed", "ran_pars", "ran_vals"), model =
   } else if (effects == "ran_vals") {
     return(frm(out_ranef))
   } else if (effects == "ran_pars") {
-    if (!silent) {
-      if (!conf.int)
-        cli_inform("Standard errors intentionally omitted because they have been calculated in log space. Confidence intervals are available with `conf.int = TRUE`.")
-      else
-        cli_inform("Standard errors intentionally omitted because they have been calculated in log space.")
-    }
     return(frm(out_re))
   } else {
     cli_abort("The specified 'effects' type is not available.")

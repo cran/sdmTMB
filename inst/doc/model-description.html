@@ -39,6 +39,107 @@ ul.task-list{list-style: none;}
 
 
 
+<style type="text/css">
+code {
+white-space: pre;
+}
+.sourceCode {
+overflow: visible;
+}
+</style>
+<style type="text/css" data-origin="pandoc">
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+{ counter-reset: source-line 0; }
+pre.numberSource code > span
+{ position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+{ content: counter(source-line);
+position: relative; left: -1em; text-align: right; vertical-align: baseline;
+border: none; display: inline-block;
+-webkit-touch-callout: none; -webkit-user-select: none;
+-khtml-user-select: none; -moz-user-select: none;
+-ms-user-select: none; user-select: none;
+padding: 0 4px; width: 4em;
+color: #aaaaaa;
+}
+pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa; padding-left: 4px; }
+div.sourceCode
+{ }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+code span.al { color: #ff0000; font-weight: bold; } 
+code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.at { color: #7d9029; } 
+code span.bn { color: #40a070; } 
+code span.bu { color: #008000; } 
+code span.cf { color: #007020; font-weight: bold; } 
+code span.ch { color: #4070a0; } 
+code span.cn { color: #880000; } 
+code span.co { color: #60a0b0; font-style: italic; } 
+code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.do { color: #ba2121; font-style: italic; } 
+code span.dt { color: #902000; } 
+code span.dv { color: #40a070; } 
+code span.er { color: #ff0000; font-weight: bold; } 
+code span.ex { } 
+code span.fl { color: #40a070; } 
+code span.fu { color: #06287e; } 
+code span.im { color: #008000; font-weight: bold; } 
+code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.kw { color: #007020; font-weight: bold; } 
+code span.op { color: #666666; } 
+code span.ot { color: #007020; } 
+code span.pp { color: #bc7a00; } 
+code span.sc { color: #4070a0; } 
+code span.ss { color: #bb6688; } 
+code span.st { color: #4070a0; } 
+code span.va { color: #19177c; } 
+code span.vs { color: #4070a0; } 
+code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } 
+</style>
+<script>
+// apply pandoc div.sourceCode style to pre.sourceCode instead
+(function() {
+  var sheets = document.styleSheets;
+  for (var i = 0; i < sheets.length; i++) {
+    if (sheets[i].ownerNode.dataset["origin"] !== "pandoc") continue;
+    try { var rules = sheets[i].cssRules; } catch (e) { continue; }
+    var j = 0;
+    while (j < rules.length) {
+      var rule = rules[j];
+      // check if there is a div.sourceCode rule
+      if (rule.type !== rule.STYLE_RULE || rule.selectorText !== "div.sourceCode") {
+        j++;
+        continue;
+      }
+      var style = rule.style.cssText;
+      // check if color or background-color is set
+      if (rule.style.color === '' && rule.style.backgroundColor === '') {
+        j++;
+        continue;
+      }
+      // replace div.sourceCode by a pre.sourceCode rule
+      sheets[i].deleteRule(j);
+      sheets[i].insertRule('pre.sourceCode{' + style + '}', j);
+    }
+  }
+})();
+</script>
 
 
 
@@ -294,6 +395,8 @@ intercepts</a></li>
 mixture</a></li>
 <li><a href="#lognormal-mixture" id="toc-lognormal-mixture">Lognormal
 mixture</a></li>
+<li><a href="#negative-binomial-2-mixture" id="toc-negative-binomial-2-mixture">Negative binomial 2
+mixture</a></li>
 </ul></li>
 <li><a href="#gaussian-random-fields" id="toc-gaussian-random-fields">Gaussian random fields</a>
 <ul>
@@ -548,12 +651,18 @@ variance</td>
 steps</td>
 </tr>
 <tr class="even">
+<td align="left"><span class="math inline">\(\rho_{\gamma}\)</span></td>
+<td align="left"><code>rho_time</code></td>
+<td align="left">Correlation between time-varying coefficients in
+subsequent time steps</td>
+</tr>
+<tr class="odd">
 <td align="left"><span class="math inline">\(\boldsymbol{A}\)</span></td>
 <td align="left"><code>A</code></td>
 <td align="left">Sparse projection matrix to interpolate between knot
 and data locations</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td align="left"><span class="math inline">\(\boldsymbol{H}\)</span></td>
 <td align="left"><code>H</code></td>
 <td align="left">2-parameter rotation matrix used to define
@@ -819,32 +928,65 @@ steady-state marginal variance.</p>
 </div>
 <div id="time-varying-regression-parameters" class="section level2">
 <h2>Time-varying regression parameters</h2>
-<p>Parameters can be modelled as time varying (a random walk) according
-to the form</p>
+<p>Parameters can be modelled as time-varying according to a random walk
+or first-order autoregressive, AR(1), process. The time-series model is
+defined by <code>time_varying_type</code>. For all types:</p>
 <p><span class="math display">\[
 \begin{aligned}
   \mu_{\boldsymbol{s},t} &amp;= f^{-1} \left( \ldots
 +  \boldsymbol{X}^{\mathrm{tvc}}_{\boldsymbol{s},t}
-\boldsymbol{\gamma_{t}} + \ldots \right),\\
+\boldsymbol{\gamma_{t}} + \ldots \right),
+\end{aligned}
+\]</span> where <span class="math inline">\(\boldsymbol{\gamma_t}\)</span> is an optional
+vector of time-varying regression parameters and <span class="math inline">\(\boldsymbol{X}^{\mathrm{tvc}}_{\boldsymbol{s},t}\)</span>
+is the corresponding model matrix with covariate values. This is defined
+via the <code>time_varying</code> argument, assuming that the
+<code>time</code> argument is also supplied a column name.
+<code>time_varying</code> takes a <em>one-sided</em> formula.
+<code>~ 1</code> implies a time-varying intercept.</p>
+<p>For <code>time_varying_type = &#39;rw&#39;</code>, the first time step is
+estimated independently:</p>
+<p><span class="math display">\[
+\begin{aligned}
   \gamma_{t=1} &amp;\sim \operatorname{Uniform} \left(-\infty, \infty
 \right),\\
   \gamma_{t&gt;1} &amp;\sim \operatorname{Normal} \left(\gamma_{t-1},
-\sigma^2_{\gamma} \right),
+\sigma^2_{\gamma} \right).
 \end{aligned}
 \]</span></p>
-<p>where <span class="math inline">\(\boldsymbol{\gamma_t}\)</span> is
-an optional vector of time-varying regression parameters and <span class="math inline">\(\boldsymbol{X}^{\mathrm{tvc}}_{\boldsymbol{s},t}\)</span>
-is the corresponding model matrix with covariate values. This is defined
-via the <code>time_varying</code> argument, assuming that the
-<code>time</code> argument is also supplied a column name. For example,
-<code>time_varying ~ 0 + x</code>. The first value is given an implicit
-uniform prior. I.e., the same variable should not appear in the fixed
-effect formula since the initial value is estimated as part of the
-time-varying formula. The formula <code>time_varying = ~ 1</code>
-implicitly represents a time-varying intercept and, this case, the
-intercept should be omitted from the main effects
-(<code>formula ~ + 0 + ...</code> or
+<p>In this case, the first time-step value is given an implicit uniform
+prior. I.e., the same variable should not appear in the fixed effect
+formula since the initial value is estimated as part of the time-varying
+formula. The formula <code>time_varying = ~ 1</code> implicitly
+represents a time-varying intercept (assuming the <code>time</code>
+argument has been supplied) and, this case, the intercept should be
+omitted from the main effects (<code>formula ~ + 0 + ...</code> or
 <code>formula ~ -1 + ...</code>).</p>
+<p>For <code>time_varying_type = &#39;rw0&#39;</code>, the first time step is
+estimated from a mean-zero prior:</p>
+<p><span class="math display">\[
+\begin{aligned}
+  \gamma_{t=1} &amp;\sim \operatorname{Normal} \left(0,
+\sigma^2_{\gamma} \right),\\
+  \gamma_{t&gt;1} &amp;\sim \operatorname{Normal} \left(\gamma_{t-1},
+\sigma^2_{\gamma} \right).
+\end{aligned}
+\]</span> In this case, the time-varying variable (including the
+intercept) <em>should</em> be included in the main effects. We suggest
+using this formulation, but leave the <code>&#39;rw&#39;</code> option so that
+legacy code works.</p>
+<p>For <code>time_varying_type = &#39;ar1&#39;</code>:</p>
+<p><span class="math display">\[
+\begin{aligned}
+  \gamma_{t=1} &amp;\sim \operatorname{Normal} \left(0,
+\sigma^2_{\gamma} \right),\\
+  \gamma_{t&gt;1} &amp;\sim \operatorname{Normal}
+\left(\rho_\gamma\gamma_{t-1}, \sqrt{1 - \rho_\gamma^2}
+\sigma^2_{\gamma} \right),
+\end{aligned}
+\]</span> where <span class="math inline">\(\rho_{\gamma}\)</span> is
+the correlation between subsequent time steps. The first time step is
+given a mean-zero prior.</p>
 </div>
 <div id="spatially-varying-coefficients-svc" class="section level2">
 <h2>Spatially varying coefficients (SVC)</h2>
@@ -1087,6 +1229,22 @@ probability of larger events).</p>
 \mu_{2}\)</span> and the variance is <span class="math inline">\((1-p) ^
 2 \cdot \mu_{1} \cdot \phi^2 + (p) ^ 2 \cdot \mu_{2} \cdot
 \phi^2\)</span>.</p>
+<p>Here, and for the other mixture distributions, the probability of the
+larger mean can be obtained from
+<code>plogis(fit$model$par[[&quot;logit_p_mix&quot;]])</code> and the ratio of the
+larger mean to the smaller mean can be obtained from
+<code>1 + exp(fit$model$par[[&quot;log_ratio_mix&quot;]])</code>. The standard
+errors are available in the TMB sdreport:
+<code>fit$sd_report</code>.</p>
+<p>If you wish to fix the probability of a large (i.e., extreme) mean,
+which can be hard to estimate, you can use the <code>map</code> list.
+E.g.:</p>
+<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a><span class="fu">sdmTMB</span>(...,</span>
+<span id="cb1-2"><a href="#cb1-2" tabindex="-1"></a>  <span class="at">control =</span> <span class="fu">sdmTMBcontrol</span>(</span>
+<span id="cb1-3"><a href="#cb1-3" tabindex="-1"></a>    <span class="at">start =</span> <span class="fu">list</span>(<span class="at">logit_p_mix =</span> <span class="fu">qlogis</span>(<span class="fl">0.05</span>)), <span class="co"># 5% probability of &#39;mu2&#39;</span></span>
+<span id="cb1-4"><a href="#cb1-4" tabindex="-1"></a>    <span class="at">map =</span> <span class="fu">list</span>(<span class="at">logit_p_mix =</span> <span class="fu">factor</span>(<span class="cn">NA</span>)) <span class="co"># don&#39;t estimate</span></span>
+<span id="cb1-5"><a href="#cb1-5" tabindex="-1"></a>  )</span>
+<span id="cb1-6"><a href="#cb1-6" tabindex="-1"></a>)</span></code></pre></div>
 <p>Example: <code>family = gamma_mix(link = &quot;log&quot;)</code>. See also
 <code>family = delta_gamma_mix()</code> for an extension incorporating
 this distribution with delta models.</p>
@@ -1109,6 +1267,19 @@ interpreted as the probability of larger events).</p>
 <p>Example: <code>family = lognormal_mix(link = &quot;log&quot;)</code>. See also
 <code>family = delta_lognormal_mix()</code> for an extension
 incorporating this distribution with delta models.</p>
+</div>
+<div id="negative-binomial-2-mixture" class="section level2">
+<h2>Negative binomial 2 mixture</h2>
+<p>This is a 2 component mixture that extends the NB2 distribution,</p>
+<p><span class="math display">\[
+(1 - p) \cdot \operatorname{NB2} \left( \mu_1, \phi \right) + p \cdot
+\operatorname{NB2} \left( \mu_2, \phi \right)
+\]</span></p>
+<p>where <span class="math inline">\(\mu_1\)</span> is the mean of the
+first (smaller component) of the distribution, <span class="math inline">\(\mu_2\)</span> is the mean of the larger
+component, and <span class="math inline">\(p\)</span> controls the
+contribution of each component to the mixture.</p>
+<p>Example: <code>family = nbinom2_mix(link = &quot;log&quot;)</code></p>
 </div>
 </div>
 <div id="gaussian-random-fields" class="section level1">

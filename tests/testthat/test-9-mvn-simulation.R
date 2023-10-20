@@ -1,7 +1,6 @@
 test_that("rmvnorm sim prediction works with no random effects", {
   skip_on_cran()
   skip_on_ci()
-  skip_if_not_installed("INLA")
   m <- sdmTMB(
     data = pcod_2011,
     formula = density ~ 0 + as.factor(year),
@@ -27,7 +26,6 @@ test_that("rmvnorm sim prediction works with no random effects", {
 test_that("rmvnorm sim prediction works", {
   skip_on_cran()
   skip_on_ci()
-  skip_if_not_installed("INLA")
   mesh <- make_mesh(pcod, c("X", "Y"), cutoff = 10)
   m <- sdmTMB(
     data = pcod,
@@ -54,7 +52,6 @@ test_that("rmvnorm sim prediction works", {
 test_that("get_index_sims works", {
   skip_on_cran()
   skip_on_ci()
-  skip_if_not_installed("INLA")
   m <- sdmTMB(density ~ 0 + as.factor(year),
     data = pcod_2011, mesh = pcod_mesh_2011, family = tweedie(link = "log"),
     time = "year", spatiotemporal = "off"
@@ -139,7 +136,6 @@ test_that("get_index_sims works", {
 test_that("rmvnorm sim prediction works", {
   skip_on_cran()
   skip_on_ci()
-  skip_if_not_installed("INLA")
   mesh <- make_mesh(pcod, c("X", "Y"), cutoff = 10)
   m <- sdmTMB(
     data = pcod,
@@ -166,7 +162,6 @@ test_that("rmvnorm sim prediction works", {
 test_that("predict link attribute and get_index_sims work with delta", {
   skip_on_cran()
   skip_on_ci()
-  skip_if_not_installed("INLA")
   m <- sdmTMB(density ~ 0 + as.factor(year),
               data = pcod_2011, mesh = pcod_mesh_2011, family = delta_gamma(),
               time = "year", spatiotemporal = "off"
@@ -241,7 +236,6 @@ test_that("predict link attribute and get_index_sims work with delta", {
 test_that("rmvnorm sim prediction works with various sims_vars", {
   skip_on_cran()
   skip_on_ci()
-  skip_if_not_installed("INLA")
 
   # https://github.com/pbs-assess/sdmTMB/issues/107
   d <- subset(pcod, year == 2003)
@@ -300,4 +294,33 @@ test_that("rmvnorm sim prediction works with various sims_vars", {
 
   p3c <- predict(m3, nsim = 3, sims_var = 'epsilon_st', model = 1)
   expect_identical(dim(p3c), c(nrow(d), 3L))
+})
+
+test_that("nsim with s() and no other random effects works", {
+  # https://github.com/pbs-assess/sdmTMB/issues/233
+  # non-spatial model with smooth
+  fit <- sdmTMB(
+    density ~ s(depth),
+    spatial = "off",
+    data = pcod_2011,
+    family = tweedie(link = "log")
+  )
+  p <- predict(fit, nsim = 3L)
+  expect_true(ncol(p) == 3L)
+})
+
+test_that("gather/spread sims work", {
+  skip_on_cran()
+  skip_on_ci()
+
+  m <- sdmTMB(density ~ 0 + depth_scaled + depth_scaled2,
+    data = pcod_2011, mesh = pcod_mesh_2011, family = tweedie(),
+    spatiotemporal = "off")
+  x <- spread_sims(m, nsim = 10)
+  expect_true(nrow(x) == 10L)
+  expect_s3_class(x, "data.frame")
+
+  x <- gather_sims(m, nsim = 10)
+  expect_true(ncol(x) == 3L)
+  expect_s3_class(x, "data.frame")
 })

@@ -23,10 +23,9 @@
 #' * `.iteration`: the sample ID
 #' * columns for each parameter with a sample per row
 #'
-#' @examplesIf inla_installed()
-#' m <- sdmTMB(density ~ 0 + depth_scaled + depth_scaled2,
-#'   data = pcod_2011, mesh = pcod_mesh_2011, family = tweedie(),
-#'   spatiotemporal = "AR1", time = "year")
+#' @examples
+#' m <- sdmTMB(density ~ depth_scaled,
+#'   data = pcod_2011, mesh = pcod_mesh_2011, family = tweedie())
 #' head(spread_sims(m, nsim = 10))
 #' head(gather_sims(m, nsim = 10))
 #' samps <- gather_sims(m, nsim = 1000)
@@ -63,7 +62,7 @@ spread_sims <- function(object, nsim = 200, n_sims = deprecated()) {
   if (isTRUE(object$family$delta)) {
     cli_warn("If your delta model has 2 formulas, this function is only using the first")
   }
-  .formula <- object$split_formula[[1]]$fixedFormula # TODO DELTA HARDCODED TO 1!
+  .formula <- object$split_formula[[1]]$form_no_bars # TODO DELTA HARDCODED TO 1!
   if (isFALSE(object$mgcv)) {
     fe_names <- colnames(model.matrix(.formula, object$data))
   } else {

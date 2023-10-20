@@ -9,9 +9,12 @@
 #'   Sometimes restarting the optimizer at the previous best values aids
 #'   convergence. If the maximum gradient is still too large,
 #'   try increasing this to `2`.
-#' @param newton_loops How many Newton optimization steps to try with
-#'   [stats::optimHess()] after running [stats::nlminb()]. Sometimes aids
-#'   convergence.
+#' @param newton_loops How many Newton optimization steps to try after running
+#'   [stats::nlminb()]. This sometimes aids convergence by further reducing the
+#'   log-likelihood gradient with respect to the fixed effects. This calculates
+#'   the Hessian at the current MLE with [stats::optimHess()] using a
+#'   finite-difference approach and uses this to update the fixed effect
+#'   estimates.
 #' @param mgcv **Deprecated** Parse the formula with [mgcv::gam()]?
 #' @param map_rf **Deprecated** use `spatial = 'off', spatiotemporal = 'off'` in
 #'   [sdmTMB()].
@@ -46,6 +49,10 @@
 #'   cases) can be specified as a numeric vector. E.g.
 #'   `lower = list(b_j = c(-5, -5))`.
 #' @param upper An optional named list of upper bounds within the optimization.
+#' @param censored_upper An optional vector of upper bounds for
+#'   [sdmTMBcontrol()]. Values of `NA` indicate an unbounded right-censored to
+#'   distribution, values greater that the observation indicate and upper bound,
+#'   and values equal to the observation indicate no censoring.
 #' @param get_joint_precision Logical. Passed to `getJointPrecision` in
 #'   [TMB::sdreport()]. Must be `TRUE` to use simulation-based methods in
 #'   [predict.sdmTMB()] or `[get_index_sims()]`. If not needed, setting this
@@ -54,15 +61,6 @@
 #'   cores, as an example, use `TMB::openmp(n = 3, DLL = "sdmTMB")`. But be
 #'   careful, because it's not always faster with more cores and there is
 #'   definitely an upper limit.
-# Number of cores to use.
-# Best set with the option
-#   `options(sdmTMB.cores = n)`, where `n` is the number of cores.
-#   Currently only works on Mac/Linux. Note that the models in sdmTMB
-#   often slow down with too many cores. Ideal numbers appear to be
-#   a bit less than half the available cores or ~3-4 on the machines
-#   we have tested. Also propogates to prediction and index calculation.
-#   Can we tweaked after the fact in a fitted model by modifying
-#   `fit$control$parallel`.
 #' @param ... Anything else. See the 'Control parameters' section of
 #'   [stats::nlminb()].
 #'
@@ -72,7 +70,7 @@
 #' Usually used within [sdmTMB()]. For example:
 #'
 #' ```
-#' sdmTMB(..., control = sdmTMBcontrol(newton_loops = 1))
+#' sdmTMB(..., control = sdmTMBcontrol(newton_loops = 2))
 #' ```
 #' @examples
 #' sdmTMBcontrol()
@@ -81,7 +79,7 @@ sdmTMBcontrol <- function(
   iter.max = 1e3L,
   normalize = FALSE,
   nlminb_loops = 1L,
-  newton_loops = 0L,
+  newton_loops = 1L,
   mgcv = deprecated(),
   quadratic_roots = FALSE,
   start = NULL,
@@ -89,6 +87,7 @@ sdmTMBcontrol <- function(
   map = NULL,
   lower = NULL,
   upper = NULL,
+  censored_upper = NULL,
   multiphase = TRUE,
   profile = FALSE,
   get_joint_precision = TRUE,
@@ -96,13 +95,19 @@ sdmTMBcontrol <- function(
   ...) {
 
   if (is_present(mgcv)) {
-    deprecate_warn("0.0.20", "sdmTMBcontrol(mgcv)",
+    deprecate_stop("0.0.20", "sdmTMBcontrol(mgcv)",
       details = "`mgcv` argument no longer does anything.")
   }
 
   if (is_present(map_rf)) {
     deprecate_stop("0.0.22", "sdmTMBcontrol(map_rf)", "sdmTMB(spatial = 'off', spatiotemporal = 'off')")
   }
+  assert_that(is.numeric(nlminb_loops), is.numeric(newton_loops))
+  assert_that(nlminb_loops >= 1L)
+  assert_that(newton_loops >= 0L)
+  # if (newton_loops > 1L) {
+  #   cli::cli_inform("There is rarely a benefit to making `newton_loops` > 1.")
+  # }
 
   if (!is.null(parallel)) {
     assert_that(!is.na(parallel), parallel > 0)
@@ -121,6 +126,7 @@ sdmTMBcontrol <- function(
     map,
     lower,
     upper,
+    censored_upper,
     multiphase,
     parallel,
     get_joint_precision
@@ -222,10 +228,14 @@ parse_threshold_formula <- function(formula, thresh_type_short = "lin_thresh",
   list(formula = formula, threshold_parameter = threshold_parameter)
 }
 
-expand_time <- function(df, time_slices, time_column) {
-  df[["weight_sdmTMB"]] <- 1
+expand_time <- function(df, time_slices, time_column, weights, offset, upr) {
+  if (!is.null(weights)) df[["__weight_sdmTMB__"]] <- weights
+  if (!is.null(offset)) df[["__sdmTMB_offset__"]] <- offset
+  if (!is.null(upr)) df[["__dcens_upr__"]] <- upr
   fake_df <- df[1L, , drop = FALSE]
-  fake_df[["weight_sdmTMB"]] <- 0
+  if (!is.null(weights)) fake_df[["__weight_sdmTMB__"]] <- 0
+  if (!is.null(offset))fake_df[["__sdmTMB_offset__"]] <- 0
+  if (!is.null(upr)) fake_df[["__dcens_upr__"]] <- NA_real_
   missing_years <- time_slices[!time_slices %in% df[[time_column]]]
   fake_df <- do.call("rbind", replicate(length(missing_years), fake_df, simplify = FALSE))
   fake_df[[time_column]] <- missing_years
@@ -250,18 +260,6 @@ check_valid_factor_levels <- function(x, .name = "") {
       "Random effect group column `%s` has extra factor levels. Please remove them.", .name))
 }
 
-#' Check if INLA installed (i.e., not on CRAN)
-#'
-#' @export
-#' @rdname inla_installed
-#' @keywords internal
-#' @return Returns `TRUE` or `FALSE`.
-inla_installed <- function() {
-  r1 <- requireNamespace("INLA", quietly = TRUE)
-  r2 <- requireNamespace("rgdal", quietly = TRUE)
-  r1 && r2
-}
-
 #' Check if ggplot2 installed
 #'
 #' @export
@@ -284,10 +282,7 @@ remove_s_and_t2 <- function(formula) {
 }
 
 has_no_random_effects <- function(obj) {
-  "omega_s" %in% names(obj$tmb_map) &&
-    "epsilon_st" %in% names(obj$tmb_map) &&
-    "b_rw_t" %in% names(obj$tmb_map) &&
-    !"RE" %in% obj$tmb_random
+  length(obj$tmb_random) == 0L
 }
 
 #' Get TMB parameter list
@@ -296,7 +291,7 @@ has_no_random_effects <- function(obj) {
 #'
 #' @return A named list of parameter values
 #'
-#' @examplesIf inla_installed()
+#' @examples
 #' fit <- sdmTMB(present ~ 1, data = pcod_2011, family = binomial(), spatial = "off")
 #' pars <- get_pars(fit)
 #' names(pars)
@@ -337,4 +332,191 @@ replicate_df <- function(dat, time_name, time_values) {
   nd <- do.call("rbind", replicate(length(time_values), dat, simplify = FALSE))
   nd[[time_name]] <- rep(time_values, each = nrow(dat))
   nd
+}
+
+# work one delta model at a time
+# only diff with 2nd part is that the 'fake' values need to be larger than first
+# so make a function for just 1 component
+# then add an increment for 2nd that's always bigger (e.g. 100s vs. 1000s)
+# then as.factor() them down in sequence
+# check if share_range = TRUE or if one of spatial or spatiotemporal is 'off',
+# if so the values in that column should be identical
+# check if share_range = TRUE or if one of spatial or spatiotemporal is 'off',
+# if so the values in that column should be identical
+map_kappa <- function(spatial, spatiotemporal, share_range, a = 100L) {
+  if (share_range) {
+    if (!spatial && !spatiotemporal) {
+      x <- c(NA_integer_, NA_integer_)
+    } else {
+      x <- c(a, a)
+    }
+  } else {
+    if (spatial && spatiotemporal) x <- c(a, a + 1L)
+    if (!spatial || !spatiotemporal) x <- c(a, a)
+    if (!spatial && !spatiotemporal) x <- c(NA_integer_, NA_integer_)
+  }
+  x
+}
+
+get_kappa_map <- function(
+    n_m = 2,
+    spatial = c("on", "off"),
+    spatiotemporal = c("on", "on"),
+    share_range = c(FALSE, FALSE)) {
+  spatial <- spatial == "on"
+  spatiotemporal <- spatiotemporal %in% c("on", "iid", "rw", "ar1")
+  k <- map_kappa(spatial[1], spatiotemporal[1], share_range[1], 100L)
+  if (n_m > 1) {
+    k2 <- map_kappa(spatial[2], spatiotemporal[2], share_range[2], 1000L)
+    k <- cbind(k, k2)
+  }
+  as.factor(as.integer(as.factor(k)))
+}
+
+
+#' Calculate scaling factor for hook competition using censored method
+#'
+#' @param prop_removed A vector (numeric) containing the proportion of baits
+#'   removed in each fishing event.
+#' @param n_hooks A vector (integers) containing the number of hooks
+#'   deployed in each fishing event.
+#' @param pstar A single value (numeric) specifying the breakdown point of
+#'   observed catch counts as a result of hook competition.
+#' @return A vector containing the scale factor used to calculate the
+#'   upper bound on catch counts of target species to improve convergence of
+#'   censored method. See \doi{10.1139/cjfas-2022-0159}, including supplementary
+#'   materials section S.3 for more details.
+#' @noRd
+get_scale_factor <- function(prop_removed, n_hooks, pstar) {
+  # Apply pstar correction
+  prop_hook <- signif(((prop_removed - pstar) / (1 - pstar)), 5)
+  n_hooks <- round((1 - pstar) * n_hooks)
+  # Calculate competition adjustment factor
+  prop <- 1 - prop_hook
+  prop[prop == 0] <- 1 / n_hooks[prop == 0] # if all hooks saturated - map to 1 hook
+  -log(prop) / (1 - prop)
+}
+
+#' Calculate an upper bound on catch counts for the censored Poisson family
+#'
+#' @param prop_removed The proportion of baits removed in each fishing event
+#'   from *any* species. I.e., the proportion of hooks returning without bait
+#'   for any reason.
+#' @param n_catch The observed catch counts on each fishing event of the target
+#'   species.
+#' @param n_hooks The number of hooks deployed on each fishing event.
+#' @param pstar A single value between `0 <= pstar <= 1` specifying the
+#'   breakdown point of observed catch counts as a result of hook competition.
+#'
+#' @details `pstar` could be obtained via inspecting a GAM or other smoother fit
+#'   with catch counts as the response, an offset for log(hook count), and
+#'   proportion of baits removed for each fishing event as the predictor.
+#'   Check when the curve drops off as the proportion bait removed increases.
+#'
+#' The `lwr` limit for [sdmTMB::censored_poisson()] should be the observed catch
+#' counts, i.e., `n_catch` here.
+#'
+#' If `upr` in [sdmTMB::censored_poisson()] is set to NA, the full
+#' right-censored Poisson likelihood is used without any upper bound.
+#'
+#' The right-censored Poisson density can be written as:
+#'
+#' ```
+#'   dcens_pois <- function(x, lambda) {
+#'       1 - ppois(x - 1, lambda)
+#'    }
+#' ```
+#'
+#' and the right-censored Poisson density with an upper limit can be written as:
+#'
+#' ```
+#'   dcens_pois_upper <- function(x, lambda, upper) {
+#'     ppois(upper, lambda) - ppois(x - 1, lambda)
+#'   }
+#' ```
+#'
+#' In practice, these computations are done in log space for numerical
+#' stability.
+#'
+#' @return A numeric vector of upper bound catch counts of the target species to
+#'   improve convergence of the censored method.
+#'
+#' @references See \doi{10.1139/cjfas-2022-0159} for more details.
+#' @noRd
+#'
+#' @examples
+#' dat <- structure(
+#'   list(
+#'     n_catch = c(
+#'       78L, 63L, 15L, 6L, 7L, 11L, 37L, 99L, 34L, 100L, 77L, 79L,
+#'       98L, 30L, 49L, 33L, 6L, 28L, 99L, 33L
+#'     ),
+#'     prop_removed = c(
+#'       0.61, 0.81, 0.96, 0.69, 0.99, 0.98, 0.25, 0.95, 0.89, 1, 0.95, 0.95,
+#'       0.94, 1, 0.95, 1, 0.84, 0.3, 1, 0.99
+#'     ), n_hooks = c(
+#'       140L, 140L, 140L, 140L, 140L, 140L, 140L, 140L, 140L, 140L, 140L, 140L,
+#'       140L, 140L, 140L, 140L, 140L, 140L, 140L, 140L
+#'     )
+#'   ),
+#'   class = "data.frame", row.names = c(NA, -20L)
+#' )
+#' upr <- get_censored_upper(dat$prop_removed, dat$n_catch, dat$n_hooks, pstar = 0.9)
+#' upr
+#'
+#' plot(dat$n_catch, upr, xlab = "N catch", ylab = "N catch upper limit")
+#' abline(0, 1, lty = 2)
+#' above_pstar <- dat[dat$prop_removed > 0.9, ]
+#' upr_pstar <- upr[dat$prop_removed > 0.9]
+#' points(above_pstar$n_catch, upr_pstar, col = "red", pch = 20)
+#' txt <- paste0(
+#'   "Red indicates catch events\n",
+#'   "with >= pstar proportion of hooks\n",
+#'   "coming back without bait.\n\n",
+#'   "The rest are fishing events < pstar\n",
+#'   "('high-quality' events)."
+#' )
+#' text(10, 120, txt, adj = 0)
+get_censored_upper <- function(
+    prop_removed,
+  n_catch,
+  n_hooks,
+  pstar = 0.95) {
+  assertthat::assert_that(
+    is.numeric(prop_removed),
+    is.numeric(n_catch),
+    is.numeric(n_hooks)
+  )
+  assertthat::assert_that(length(prop_removed) == length(n_catch))
+  assertthat::assert_that(length(prop_removed) == length(n_hooks))
+  assertthat::assert_that(pstar >= 0)
+  assertthat::assert_that(pstar <= 1)
+  assertthat::assert_that(all(prop_removed <= 1))
+  assertthat::assert_that(all(prop_removed >= 0))
+  assertthat::assert_that(all(n_catch >= 0))
+  assertthat::assert_that(all(n_hooks >= 0))
+  assertthat::assert_that(sum(is.na(c(prop_removed, n_catch, n_hooks))) == 0)
+
+  removed_ind <- prop_removed > pstar
+  # FIXME: add cli::cli_abort()?
+  # probably need to throw error if length(removed_ind) == 0L
+  upper_bound <- rep(0, length(prop_removed))
+  scale_fac <- rep(0, length(prop_removed))
+
+  # Calculate part of scaling factor used to get upper bound (part of eq. S.20)
+  scale_fac[removed_ind] <-
+    get_scale_factor(
+      pstar = pstar,
+      prop_removed = prop_removed[removed_ind],
+      n_hooks = n_hooks[removed_ind]
+    )
+
+  # Upper bound for a species (part of eq. S.22)
+  upper_bound[removed_ind] <- (prop_removed[removed_ind] - pstar) *
+    n_hooks[removed_ind] * scale_fac[removed_ind]
+
+  high <- n_catch
+  high[prop_removed >= pstar] <- high[prop_removed >= pstar] +
+    upper_bound[prop_removed >= pstar]
+  round(high)
 }

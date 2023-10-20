@@ -1,7 +1,6 @@
 test_that("Basic cross validation works", {
   skip_on_ci()
   skip_on_cran()
-  skip_if_not_installed("INLA")
   d <- pcod
   spde <- make_mesh(d, c("X", "Y"), cutoff = 15)
 
@@ -51,7 +50,6 @@ test_that("Basic cross validation works", {
 test_that("Leave future out cross validation works", {
   skip_on_ci()
   skip_on_cran()
-  skip_if_not_installed("INLA")
   x <- sdmTMB_cv(
     present ~ 1,
     data = pcod_2011,
@@ -72,7 +70,6 @@ test_that("Leave future out cross validation works", {
   table(x$models[[1]]$data$cv_fold, x$models[[1]]$data$year)
 
   expect_equal(length(x$models), 2)
-  expect_equal(length(x$fold_elpd), 2)
   expect_equal(length(x$fold_loglik), 2)
   expect_equal(length(x$max_gradients), 2)
   expect_equal(cor(x$data$cv_fold[x$data$cv_fold!=1], x$data$year[x$data$cv_fold!=1]), 1.0)
@@ -81,7 +78,6 @@ test_that("Leave future out cross validation works", {
 test_that("Cross validation with offsets works", {
   skip_on_ci()
   skip_on_cran()
-  skip_if_not_installed("INLA")
   skip_if_not_installed("future")
   skip_if_not_installed("future.apply")
 
@@ -89,8 +85,8 @@ test_that("Cross validation with offsets works", {
   d <- pcod_2011
   d$log_effort <- rnorm(nrow(d))
 
-  library(future)
-  future::plan(future::multisession)
+  # library(future)
+  # future::plan(future::multisession)
 
   expect_error(
     fit_cv_off1 <- sdmTMB_cv(
@@ -203,16 +199,44 @@ test_that("Cross validation with offsets works", {
     parallel = FALSE #<
   )
 
-  expect_equal(fit_cv_off1$models[[1]]$model, fit_cv_off2$models[[1]]$model)
-  expect_equal(fit_cv_off1$models[[1]]$model, fit_cv_off3$models[[1]]$model)
-  expect_equal(fit_cv_off1$models[[1]]$model, fit_cv_off4$models[[1]]$model)
+  expect_equal(round(fit_cv_off1$models[[1]]$model$par, 4), round(fit_cv_off2$models[[1]]$model$par, 4))
+  expect_equal(round(fit_cv_off1$models[[1]]$model$par, 4), round(fit_cv_off3$models[[1]]$model$par, 4))
+  expect_equal(round(fit_cv_off1$models[[1]]$model$par, 4), round(fit_cv_off4$models[[1]]$model$par, 4))
 
   # with/without offset:
-  expect_false(identical(fit_cv_off1$models[[1]]$model, fit_cv_off5$models[[1]]$model))
+  expect_false(identical(fit_cv_off1$models[[1]]$model$par, fit_cv_off5$models[[1]]$model$par))
 
-  expect_equal(fit_cv_off5$models[[1]]$model, fit_cv_off6$models[[1]]$model)
-  expect_equal(fit_cv_off5$models[[1]]$model, fit_cv_off7$models[[1]]$model)
-  expect_equal(fit_cv_off5$models[[1]]$model, fit_cv_off8$models[[1]]$model)
+  expect_equal(round(fit_cv_off5$models[[1]]$model$par, 4), round(fit_cv_off6$models[[1]]$model$par, 4))
+  expect_equal(round(fit_cv_off5$models[[1]]$model$par, 4), round(fit_cv_off7$models[[1]]$model$par, 4))
+  expect_equal(round(fit_cv_off5$models[[1]]$model$par, 4), round(fit_cv_off8$models[[1]]$model$par, 4))
 
-  future::plan(future::sequential)
+  # future::plan(future::sequential)
+})
+
+test_that("Delta model cross validation works", {
+  skip_on_ci()
+  skip_on_cran()
+  set.seed(1)
+  out_tw <- sdmTMB_cv(
+    density ~ depth_scaled,
+    data = pcod_2011, mesh = pcod_mesh_2011, spatial = "off",
+    family = tweedie(), k_folds = 2
+  )
+  set.seed(1)
+  out_dg <- sdmTMB_cv(
+    density ~ depth_scaled,
+    data = pcod_2011, mesh = pcod_mesh_2011, spatial = "off",
+    family = delta_gamma(), k_folds = 2
+  )
+  diff_ll <- out_tw$sum_loglik - out_dg$sum_loglik
+  expect_equal(round(diff_ll, 4), round(-22.80799, 4))
+
+  set.seed(1)
+  out_dpg <- sdmTMB_cv(
+    density ~ depth_scaled,
+    data = pcod_2011, mesh = pcod_mesh_2011, spatial = "off",
+    family = delta_poisson_link_gamma(), k_folds = 2
+  )
+  diff_ll <- out_dpg$sum_loglik - out_dg$sum_loglik
+  expect_equal(round(diff_ll, 4), round(-4.629497, 4))
 })

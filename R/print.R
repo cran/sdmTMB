@@ -146,7 +146,7 @@ print_smooth_effects <- function(x, m = 1) {
 print_iid_re <- function(x, m = 1) {
   .tidy <- tidy(x, "ran_pars", model = m, silent = TRUE)
   if ("sigma_G" %in% .tidy$term) {
-    re_int_names <- barnames(x$split_formula[[1]]$reTrmFormulas) # TODO DELTA HARDCODED TO 1
+    re_int_names <- x$split_formula[[1]]$barnames # TODO DELTA HARDCODED TO 1
     re_int_mat <- matrix(NA_real_, nrow = length(re_int_names), ncol = 1L)
     re_int_mat[, 1L] <- round(.tidy$estimate[.tidy$term == "sigma_G"], 2L)
     rownames(re_int_mat) <- re_int_names
@@ -175,38 +175,89 @@ print_time_varying <- function(x, m = 1) {
   mm_tv
 }
 
-print_range <- function(x, m = 1) {
+print_range <- function(x, m = 1L, digits = 2L) {
   b <- tidy(x, effects = "ran_pars", model = m, silent = TRUE)
   range <- b$estimate[b$term == "range"]
   if (is.null(range)) {
     return(NULL)
   }
 
-  # if (as.logical(x$tmb_data$anisotropy)) {
-  #   aa <- plot_anisotropy(x, return_data = TRUE)
-  #   # range <- aa$a[aa$random_field == "spatial"]
-  # }
-
-  range <- mround(range, 2L)
+  range <- mround(range, digits)
   range_text <- if (x$tmb_data$share_range[m]) {
-    paste0("Matern range: ", range[1], "\n")
+    paste0("Mat\u00e9rn range: ", range[1], "\n")
   } else {
     paste0(
-      "Matern range (spatial): ", range[1], "\n",
-      "Matern range (spatiotemporal): ", range[2], "\n"
+      "Mat\u00e9rn range (spatial): ", range[1], "\n",
+      "Mat\u00e9rn range (spatiotemporal): ", range[2], "\n"
     )
   }
+
+  if (as.logical(x$tmb_data$anisotropy)) {
+    range_text <- print_anisotropy(x = x, m = m)
+  }
+
   if (x$spatial[m] == "off" && x$spatiotemporal[m] == "off") {
     range_text <- NULL
   }
 
-  if (as.logical(x$tmb_data$anisotropy)) {
-    range_text <- "Matern range: anisotropic covariance; see plot_anisotropy().\n"
+  range_text
+}
+
+print_anisotropy <- function(x, m = 1L, digits = 1L) {
+  aniso_df <- plot_anisotropy(x, return_data = TRUE)
+  aniso_df$degree <- aniso_df$angle * 180 / pi
+
+  if (isTRUE(x$family$delta)) {
+    aniso_df_sp <- aniso_df[aniso_df$random_field == "spatial" &
+        aniso_df$model_num == m, ][1, c("a", "b", "degree")]
+    aniso_df_st <- aniso_df[aniso_df$random_field == "spatiotemporal" &
+        aniso_df$model_num == m, ][1L, c("a", "b", "degree")]
+  } else {
+    if (x$spatial[m] != "off") {
+      aniso_df_sp <- aniso_df[aniso_df$random_field == "spatial", ][1L, c("a", "b", "degree")]
+    }
+    if (x$spatiotemporal[m] != "off") {
+      aniso_df_st <- aniso_df[aniso_df$random_field == "spatiotemporal", ][1L, c("a", "b", "degree")]
+    }
+  }
+
+  if (x$spatial[m] != "off") {
+    aniso_df_sp[1:2] <- mround(aniso_df_sp[1:2], digits)
+    aniso_df_sp[3] <- mround(aniso_df_sp[3], 0L)
+    aniso_df_sp[4] <- paste0(
+      "Mat\u00e9rn anisotropic range (spatial): ",
+      aniso_df_sp[2], " to ", aniso_df_sp[1], " at ", aniso_df_sp[3], " deg.", "\n"
+    )
+  }
+  if (x$spatiotemporal[m] != "off") {
+    aniso_df_st[1:2] <- mround(aniso_df_st[1:2], digits)
+    aniso_df_st[3] <- mround(aniso_df_st[3], 0L)
+    aniso_df_st[4] <- paste0(
+      "Mat\u00e9rn anisotropic range (spatiotemporal): ",
+      aniso_df_st[2], " to ", aniso_df_st[1], " at ", aniso_df_st[3], " deg.", "\n"
+    )
+  }
+
+  # Spatial only
+  if (x$spatial[m] == "on" && x$spatiotemporal[m] == "off") {
+    range_text <- aniso_df_sp[[4]]
+  }
+  # Spatiotemporal only
+  if (x$spatial[m] == "off" && x$spatiotemporal[m] != "off") {
+    range_text <- aniso_df_st[[4]]
+  }
+  # Spatial and spatiotemporal shared
+  if (x$tmb_data$share_range[m] == 1L && x$spatial[m] == "on" && x$spatiotemporal[m] != "off") {
+    range_text <- aniso_df_sp[[4]]
+  }
+  # Spatial and spatiotemporal NOT shared
+  if (x$tmb_data$share_range[m] == 0L && x$spatial[m] == "on" && x$spatiotemporal[m] != "off") {
+    range_text <- paste0(aniso_df_sp[[4]], aniso_df_st[[4]])
   }
   range_text
 }
 
-print_other_parameters <- function(x, m = 1) {
+print_other_parameters <- function(x, m = 1L) {
   b <- tidy(x, "ran_pars", model = m, silent = TRUE)
 
   get_term_text <- function(term_name = "", pretext = "") {
@@ -222,12 +273,20 @@ print_other_parameters <- function(x, m = 1) {
   phi <- get_term_text("phi", "Dispersion parameter")
   tweedie_p <- get_term_text("tweedie_p", "Tweedie p")
   sigma_O <- get_term_text("sigma_O", "Spatial SD")
-  sigma_E <- get_term_text("sigma_E", "Spatiotemporal SD")
+  xtra <- if (x$spatiotemporal[m] == "ar1") "marginal " else ""
+  sigma_E <- get_term_text("sigma_E",
+    paste0("Spatiotemporal ", xtra, toupper(x$spatiotemporal[m]), " SD"))
   rho <- get_term_text("rho", "Spatiotemporal AR1 correlation (rho)")
 
   if ("sigma_Z" %in% b$term) {
-    a <- mround(b$estimate[b$term == "sigma_Z"], 2L)
+    # tidy() takes sigma_Z from the sdreport,
+    # which condenses them to unique values if mapped, so:
+    sigma_Z <- x$tmb_obj$report(x$tmb_obj$env$last.par.best)$sigma_Z
+    sigma_Z <- sigma_Z[,m,drop=TRUE]
+    a <- mround(sigma_Z, 2L)
     sigma_Z <- paste0("Spatially varying coefficient SD (", x$spatial_varying,  "): ", a, "\n")
+    sigma_Z <- gsub("\\(\\(", "\\(", sigma_Z) # ((Intercept))
+    sigma_Z <- gsub("\\)\\)", "\\)", sigma_Z) # ((Intercept))
     sigma_Z <- paste(sigma_Z, collapse = "")
   } else {
     sigma_Z <- ""
@@ -293,11 +352,15 @@ print_footer <- function(x) {
 
   cat("\nSee ?tidy.sdmTMB to extract these values as a data frame.\n")
 
-  # suppressWarnings(suppressMessages(ok <- sanity(x)$all_ok))
-  # if (!isTRUE(ok)) {
-    # cat("Possible issues detected; printing output of sanity():\n\n")
-    # sanity(x)
-  # }
+  if (as.logical(x$tmb_data$anisotropy)) {
+    cat("See ?plot_anisotropy to plot the anisotropic range.\n")
+  }
+  sink(tempfile())
+  suppressWarnings(suppressMessages(s <- sanity(x)))
+  sink()
+  if (!all(unlist(s))) {
+    cat("\n**Possible issues detected! Check output of sanity().**\n")
+  }
 }
 
 #' @export
@@ -306,7 +369,7 @@ print.sdmTMB <- function(x, ...) {
 
   # or x$tmb_obj$retape()!?
   sink(tempfile())
-  tmp <- x$tmb_obj$fn(x$tmb_obj$par) # FIXME needed?
+  # tmp <- x$tmb_obj$fn(x$tmb_obj$par) # FIXME needed?
   lp <- x$tmb_obj$env$last.par.best
   r <- x$tmb_obj$report(lp)
   sink()

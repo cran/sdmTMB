@@ -70,19 +70,22 @@ A list:
 and CV log likelihood.
 \item \code{models}: A list of models; one per fold.
 \item \code{fold_loglik}: Sum of left-out log likelihoods per fold.
-\item \code{fold_elpd}: Expected log predictive density per fold on left-out data.
 \item \code{sum_loglik}: Sum of \code{fold_loglik} across all left-out data.
-\item \code{elpd}: Expected log predictive density across all left-out data.
 \item \code{pdHess}: Logical vector: Hessian was invertible each fold?
 \item \code{converged}: Logical: all \code{pdHess} \code{TRUE}?
 \item \code{max_gradients}: Max gradient per fold.
 }
+
+Prior to \pkg{sdmTMB} version '0.3.0.9002', \code{elpd} was incorrectly returned as
+the log average likelihood, which is another metric you could compare models
+with, but not ELPD. For maximum likelihood, \href{https://github.com/pbs-assess/sdmTMB/issues/235}{ELPD is equivalent in spirit to the sum of the log likelihoods}.
 }
 \description{
-Facilitates cross validation with sdmTMB models. Returns log likelihood or
-expected log predictive density (ELPD) across left-out data. Has an option
-for leave-future-out cross validation. By default creates folds randomly but
-folds can be manually assigned.
+Facilitates cross validation with sdmTMB models. Returns the log likelihood
+of left-out data, which is similar in spirit to the ELPD (expected log
+pointwise predictive density). The function has an option for
+leave-future-out cross validation. By default, the function creates folds
+randomly but folds can be manually assigned via the \code{fold_ids} argument.
 }
 \details{
 \strong{Parallel processing}
@@ -116,7 +119,6 @@ An example of LFOCV with 9 time steps, \code{lfo_forecast = 2}, and
 See example below.
 }
 \examples{
-\dontshow{if (inla_installed()) (if (getRversion() >= "3.4") withAutoprint else force)(\{ # examplesIf}
 mesh <- make_mesh(pcod, c("X", "Y"), cutoff = 25)
 
 # Set parallel processing first if desired with the future package.
@@ -127,9 +129,6 @@ m_cv <- sdmTMB_cv(
   data = pcod, mesh = mesh,
   family = tweedie(link = "log"), k_folds = 2
 )
-
-m_cv$fold_elpd
-m_cv$elpd
 
 m_cv$fold_loglik
 m_cv$sum_loglik
@@ -171,5 +170,4 @@ m_lfocv <- sdmTMB_cv(
 example_data <- m_lfocv$models[[1]]$data
 table(example_data$cv_fold, example_data$year)
 }
-\dontshow{\}) # examplesIf}
 }

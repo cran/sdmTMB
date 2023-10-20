@@ -68,6 +68,19 @@ lognormal <- function(link = "log") {
 
 #' @details The families ending in `_mix()` are 2-component mixtures where each
 #'   distribution has its own mean but a shared scale parameter.
+#'   (Thorson et al. 2011). See the model-description vignette for details.
+#'   The parameter `plogis(log_p_mix)` is the probability of the extreme (larger)
+#'   mean and `exp(log_ratio_mix) + 1` is the ratio of the larger extreme
+#'   mean to the "regular" mean. You can see these parameters in
+#'   `model$sd_report`.
+#' @references
+#'
+#' *Families ending in `_mix()`*:
+#'
+#' Thorson, J.T., Stewart, I.J., and Punt, A.E. 2011. Accounting for fish shoals
+#' in single- and multi-species survey data using mixture distribution models.
+#' Can. J. Fish. Aquat. Sci. 68(9): 1681–1693. \doi{10.1139/f2011-086}.
+
 #' @export
 #' @rdname families
 #' @examples
@@ -102,11 +115,31 @@ lognormal_mix <- function(link = "log") {
   add_to_family(x)
 }
 
+#' @export
+#' @rdname families
+#' @examples
+#' nbinom2_mix(link = "log")
+nbinom2_mix <- function(link = "log") {
+  linktemp <- substitute(link)
+  if (!is.character(linktemp))
+    linktemp <- deparse(linktemp)
+  okLinks <- c("identity", "log", "inverse")
+  if (linktemp %in% okLinks)
+    stats <- stats::make.link(linktemp)
+  else if (is.character(link))
+    stats <- stats::make.link(link)
+  x <- c(list(family = "nbinom2_mix", link = linktemp), stats)
+  add_to_family(x)
+}
+
 #' @details
-#' The `nbinom2` negative binomial parameterization is the NB2 where the variance grows
-#' quadratically with the mean (Hilbe 2011).
+#' The `nbinom2` negative binomial parameterization is the NB2 where the
+#' variance grows quadratically with the mean (Hilbe 2011).
 #' @references
-#' Hilbe, J. M. (2011). Negative binomial regression. Cambridge University Press.
+#'
+#' *Negative binomial families*:
+#'
+#' Hilbe, J. M. 2011. Negative binomial regression. Cambridge University Press.
 #' @export
 #' @examples
 #' nbinom2(link = "log")
@@ -334,7 +367,9 @@ delta_truncated_nbinom1 <- function(link1 = "logit", link2 = "log") {
 #' @details `delta_poisson_link_gamma()` is the Poisson-link (complementary
 #'   log-log) delta model (Thorson 2018).
 #' @references
-#' Thorson, J. T. (2018). Three problems with the conventional delta-model for
+#' *Poisson-link families*:
+#'
+#' Thorson, J.T. 2018. Three problems with the conventional delta-model for
 #' biomass sampling data, and a computationally efficient alternative. Canadian
 #' Journal of Fisheries and Aquatic Sciences, 75(9), 1369-1382.
 #' \doi{10.1139/cjfas-2017-0266}

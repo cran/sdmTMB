@@ -27,14 +27,80 @@ nobs.sdmTMB <- function(object, ...) {
 fitted.sdmTMB <- function(object, ...) {
   if (isTRUE(object$family$delta)) {
     inv1 <- object$family[[1]]$linkinv
-    p1 <- inv1(predict(object, type = "link")$est1)
+    p <- predict(object, type = "link", offset = object$tmb_data$offset_i)
+    p1 <- inv1(p$est1)
     inv2 <- object$family[[2]]$linkinv
-    p2 <- inv2(predict(object, type = "link")$est2)
+    p2 <- inv2(p$est2)
     p1 * p2
   } else {
     inv <- object$family$linkinv
-    inv(predict(object, type = "link")$est)
+    inv(predict(object, type = "link", offset = object$tmb_data$offset_i)$est)
   }
+}
+
+#' Get fixed-effect coefficients
+#'
+#' @param object The fitted sdmTMB model object
+#' @param complete Currently ignored
+#' @param ... Currently ignored
+#' @importFrom stats coef
+#' @export
+#' @noRd
+coef.sdmTMB <- function(object, complete = FALSE, ...) {
+  x <- tidy(object)
+  out <- x$estimate
+  names(out) <- x$term
+  out
+}
+
+#' Get variance-covariance matrix
+#'
+#' @param object The fitted sdmTMB model object
+#' @param complete Currently ignored
+#' @param ... Currently ignored
+#' @importFrom stats vcov
+#' @export
+#' @noRd
+vcov.sdmTMB <- function(object, complete = FALSE, ...) {
+  sdr <- object$sd_report
+  v <- sdr$cov.fixed
+  fe <- tidy(object)$term
+  nm <- colnames(v)
+  i <- grepl("^b_j$", nm)
+  if (sum(i)) {
+    if (sum(i) == length(fe)) { # should always be true
+      nm[i] <- fe
+    }
+  }
+  colnames(v) <- nm
+  rownames(v) <- nm
+  if (isTRUE(complete)) {
+    return(v)
+  } else {
+    return(v[i,i,drop=FALSE])
+  }
+}
+
+#' Get CIs
+#'
+#' @param object The fitted sdmTMB model object
+#' @param parm Parameters to return CIs
+#' @param level CI level
+#' @param ... Ignored
+#' @importFrom stats confint
+#' @export
+#' @noRd
+confint.sdmTMB <- function(object, parm, level = 0.95, ...) {
+  td <- tidy(object, conf.int = TRUE, conf.level = level)
+  x <- matrix(nrow = nrow(td), ncol = 3L)
+  x[,3L] <- td$estimate
+  x[,2L] <- td$conf.high
+  x[,1L] <- td$conf.low
+  p <- ((1 - level) / 2) * 100
+  pn <- paste(c(p, 100 - p), "%")
+  colnames(x) <- c(pn, "Estimate")
+  rownames(x) <- td$term
+  x
 }
 
 #' Extract the log likelihood of a sdmTMB model
@@ -49,7 +115,11 @@ logLik.sdmTMB <- function(object, ...) {
   df <- length(object$model$par) # fixed effects only
   if (isTRUE(object$reml)) {
     s <- as.list(object$sd_report, "Estimate")
-    df <- df + length(s$b_j) + length(s$b_j2)
+    n_bs <- 0 # smoother FE
+    if (s$bs[1] != 0) { # starting value if mapped off
+      n_bs <- length(s$bs)
+    }
+    df <- df + length(s$b_j) + length(s$b_j2) + n_bs
   }
   structure(val,
     nobs = nobs, nall = nobs, df = df,
@@ -82,7 +152,7 @@ family.sdmTMB <- function (object, ...) {
   }
 }
 
-##' @importFrom nlme fixef
+#' @importFrom nlme fixef
 #' @method fixef sdmTMB
 #' @export
 fixef.sdmTMB <- function(object, ...) {
@@ -127,20 +197,6 @@ formula.sdmTMB <- function (x, ...) {
   }
 }
 
-#' @importFrom stats vcov
-#' @export
-vcov.sdmTMB <- function(object, ...) {
-  vc <- object$sd_report$cov.fixed
-  rn <- rownames(vc)
-  bj <- grepl("^b_j", rn)
-  vc <- vc[bj, bj]
-  b <- tidy(object, silent = TRUE)
-  stopifnot(nrow(b) == nrow(vc))
-  rownames(vc) <- b$term
-  colnames(vc) <- b$term
-  vc
-}
-
 #' @importFrom stats terms
 #' @export
 terms.sdmTMB <- function(x, ...) {
@@ -167,7 +223,7 @@ terms.sdmTMB <- function(x, ...) {
 #' } else {
 #'   export(Effect.sdmTMB)
 #' }
-#' @examplesIf inla_installed() && require("effects", quietly = TRUE)
+#' @examplesIf require("effects", quietly = TRUE)
 #' fit <- sdmTMB(present ~ depth_scaled, data = pcod_2011, family = binomial(),
 #'   spatial = "off")
 #' effects::effect("depth_scaled", fit)
@@ -205,7 +261,8 @@ Effect.sdmTMB <- function(focal.predictors, mod, ...) {
     coefficients = coefs,
     vcov = vc,
     family = fam,
-    formula = formula(mod)
+    # formula = formula(mod) # includes random intercepts...
+    formula = remove_s_and_t2(mod$split_formula[[1]]$form_no_bars)
   )
   effects::Effect.default(focal.predictors, mod, ..., sources = args)
 }

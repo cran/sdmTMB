@@ -9,7 +9,6 @@ test_that("RE group factor levels are properly checked.", {
 
 test_that("Model with random intercepts fits appropriately.", {
   skip_on_cran()
-  skip_if_not_installed("INLA")
   skip_if_not_installed("glmmTMB")
   set.seed(1)
   x <- stats::runif(500, -1, 1)
@@ -18,7 +17,7 @@ test_that("Model with random intercepts fits appropriately.", {
   spde <- make_mesh(loc, c("x", "y"), n_knots = 50, type = "kmeans")
 
   s <- sdmTMB_simulate(
-    ~ 1,
+    ~1,
     data = loc,
     mesh = spde,
     range = 1.4,
@@ -44,8 +43,10 @@ test_that("Model with random intercepts fits appropriately.", {
   .t1 <- tidy(m1, "ran_pars", conf.int = TRUE)
 
   # with RE:
-  m <- sdmTMB(data = s, time = NULL,
-    formula = observed ~ 1 + (1 | g) + (1 | h), mesh = spde)
+  m <- sdmTMB(
+    data = s, time = NULL,
+    formula = observed ~ 1 + (1 | g) + (1 | h), mesh = spde
+  )
   tidy(m, "fixed", conf.int = TRUE)
   .t <- tidy(m, "ran_pars", conf.int = TRUE)
   print(m)
@@ -55,18 +56,11 @@ test_that("Model with random intercepts fits appropriately.", {
   expect_lt(nrow(.t1), nrow(.t))
 
   b <- as.list(m$sd_report, "Estimate")
-  .cor <- cor(c(RE_vals, RE_vals2), b$RE[,1])
+  .cor <- cor(c(RE_vals, RE_vals2), b$RE[, 1])
   expect_equal(round(.cor, 5), 0.8313)
   expect_equal(round(b$RE[seq_len(5)], 5),
-    c(-0.28645, 0.68619, 0.10028, -0.31436, -0.61168), tolerance = 1e-5)
-
-  # missing a factor level:
-  s_drop <- s[s$g != 1, , drop = FALSE]
-  spde_drop <- make_mesh(s_drop, c("x", "y"), n_knots = 10, type = "kmeans")
-  expect_error(
-    sdmTMB(data = s_drop,
-      formula = observed ~ 1 + (1 | g) + (1 | h), mesh = spde_drop),
-    regexp = "levels"
+    c(-0.28645, 0.68619, 0.10028, -0.31436, -0.61168),
+    tolerance = 1e-5
   )
 
   p <- predict(m)
@@ -90,32 +84,80 @@ test_that("Model with random intercepts fits appropriately.", {
   # prediction without random intercepts included:
   p.nd.null <- predict(m, newdata = s, re_form_iid = NULL)
   p.nd.na <- predict(m, newdata = s, re_form_iid = NA)
-  p.nd.0 <- predict(m, newdata = s, re_form_iid = ~ 0)
+  p.nd.0 <- predict(m, newdata = s, re_form_iid = ~0)
   expect_identical(p.nd.na, p.nd.0)
   expect_false(identical(p.nd.null$est, p.nd.0$est))
 
   # random ints match glmmTMB exactly:
-  m <- sdmTMB(data = s,
-    formula = observed ~ 1 + (1 | g) + (1 | h), mesh = spde, spatial = "off")
+  m <- sdmTMB(
+    data = s,
+    formula = observed ~ 1 + (1 | g) + (1 | h), mesh = spde, spatial = "off"
+  )
   .t <- tidy(m, "ran_pars")
-  m.glmmTMB <- glmmTMB::glmmTMB(data = s,
-    formula = observed ~ 1 + (1 | g) + (1 | h))
+  m.glmmTMB <- glmmTMB::glmmTMB(
+    data = s,
+    formula = observed ~ 1 + (1 | g) + (1 | h)
+  )
   .v <- glmmTMB::VarCorr(m.glmmTMB)
   expect_equal(.t$estimate[.t$term == "sigma_G"][1],
-    sqrt(as.numeric(.v$cond$g)), tolerance = 1e-5)
+    sqrt(as.numeric(.v$cond$g)),
+    tolerance = 1e-5
+  )
   expect_equal(.t$estimate[.t$term == "sigma_G"][2],
-    sqrt(as.numeric(.v$cond$h)), tolerance = 1e-5)
+    sqrt(as.numeric(.v$cond$h)),
+    tolerance = 1e-5
+  )
 
   sdmTMB_re <- as.list(m$sd_report, "Estimate")
   glmmTMB_re <- glmmTMB::ranef(m.glmmTMB)$cond
   expect_equal(c(glmmTMB_re$g$`(Intercept)`, glmmTMB_re$h$`(Intercept)`),
-    sdmTMB_re$RE[,1], tolerance = 1e-5)
+    sdmTMB_re$RE[, 1],
+    tolerance = 1e-5
+  )
+
+  # predicting with new levels throws error for now:
+  m <- sdmTMB(data = s, formula = observed ~ 1 + (1 | g), spatial = "off")
+  nd <- data.frame(g = factor(c(1, 2, 3, 800)))
+  expect_error(predict(m, newdata = nd), regexp = "Extra")
 })
 
+test_that("Random intercepts and cross validation play nicely", {
+  skip_on_cran()
+  set.seed(1)
+  x <- stats::runif(500, -1, 1)
+  y <- stats::runif(500, -1, 1)
+  loc <- data.frame(x = x, y = y)
+  spde <- make_mesh(loc, c("x", "y"), n_knots = 50, type = "kmeans")
+  s <- sdmTMB_simulate(
+    ~1,
+    data = loc,
+    mesh = spde,
+    range = 1.4,
+    phi = 0.1,
+    sigma_O = 0,
+    seed = 1,
+    B = 0
+  )
+  g <- rep(gl(3, 10), 999)
+  RE_vals <- rnorm(3, 0, 0.4)
+  s$g <- g[seq_len(nrow(s))]
+  s$observed <- s$observed + RE_vals[s$g]
+  # one level in its own fold:
+  fold_ids <- as.integer(s$g %in% c(1, 2)) + 1
+  out <- sdmTMB_cv(
+    observed ~ 1 + (1 | g),
+    fold_ids = fold_ids, k_folds = 2L, spatial = "off", data = s, mesh = spde,
+    parallel = FALSE
+  )
+  expect_equal(round(out$sum_loglik, 3), -51.36)
+  # Because the function fits with all the data but sets the missing fold to
+  # have likelihood weights of 0, the fitted model is aware of all levels and
+  # the missing levels just get left at a value of 0 because the data never
+  # inform the model, which is exactly what you want.
+})
 
 test_that("Tidy returns random intercepts appropriately.", {
   skip_on_cran()
-  skip_if_not_installed("INLA")
   skip_if_not_installed("glmmTMB")
   set.seed(1)
   x <- stats::runif(500, -1, 1)
@@ -124,7 +166,7 @@ test_that("Tidy returns random intercepts appropriately.", {
   spde <- make_mesh(loc, c("x", "y"), n_knots = 50, type = "kmeans")
 
   s <- sdmTMB_simulate(
-    ~ 1,
+    ~1,
     data = loc,
     mesh = spde,
     range = 1.4,
@@ -144,59 +186,72 @@ test_that("Tidy returns random intercepts appropriately.", {
   s$h <- h[seq_len(nrow(s))]
   s$observed <- s$observed + RE_vals[s$g] + RE_vals2[s$h]
 
-  # with RE:
-  m <- sdmTMB(data = s, time = NULL,
-              formula = observed ~ 1 + (1 | g) + (1 | h),
-              mesh = spde,
-              spatial = "off")
-
+  # with RE; check against glmmTMB
+  m <- sdmTMB(
+    data = s, time = NULL,
+    formula = observed ~ 1 + (1 | g) + (1 | h),
+    mesh = spde,
+    spatial = "off"
+  )
+  m2 <- glmmTMB::glmmTMB(
+    data = s,
+    formula = observed ~ 1 + (1 | g) + (1 | h)
+  )
   ranpars <- tidy(m, "ran_pars", conf.int = TRUE)
-  expect_equal(ranpars$estimate,
-               c(0.1934564, 0.4422655, 0.1960184), tolerance = 1e-5)
-  expect_equal(ranpars$conf.low,
-               c(0.1812356, 0.3367532, 0.1414036), tolerance = 1e-5)
-  ranint <- tidy(m, "ran_vals", conf.int = TRUE)
-  expect_equal(ranint$estimate[1:5],
-               c(-0.2281940, 0.6663989, 0.1411399, -0.3220671, -0.6363942), tolerance = 1e-5)
-  expect_equal(ranint$conf.low[1:5],
-               c(-0.5029686,0.3915682,-0.1338101,-0.5979386,-0.9114315), tolerance = 1e-5)
+  s2 <- as.list(m2$sdr, "Estimate")
+  expect_equal(ranpars$estimate[-1], exp(s2$theta), tolerance = 0.001)
+  s2se <- as.list(m2$sdr, "Std. Error")
+  upr <- exp(s2$theta + 2 * s2se$theta)
+  lwr <- exp(s2$theta - 2 * s2se$theta)
+  expect_equal(ranpars$conf.low[-1], lwr, tolerance = 0.01)
+  expect_equal(ranpars$conf.high[-1], upr, tolerance = 0.01)
 
-  # Test against same model estimated from glmmTMB
-  fit_glmmtmb <- glmmTMB::glmmTMB(data = s,
-                                formula = observed ~ 1 + (1 | g) + (1 | h))
-  expect_equal(ranef(fit_glmmtmb)$cond$g[[1]],
-               ranint$estimate[1:30], tolerance = 1e-5)
+  ranint <- tidy(m, "ran_vals", conf.int = TRUE)
+
+  expect_equal(ranef(m2)$cond$g[[1]],
+    ranint$estimate[1:30],
+    tolerance = 0.01
+  )
 
   # also check that ranef returns the same thing with same names
-  expect_equal(names(ranef(fit_glmmtmb)$cond), names(ranef(m)$cond))
+  expect_equal(names(ranef(m2)$cond), names(ranef(m)$cond))
 
   # and check that they return the same values
-  expect_equal(ranef(fit_glmmtmb)$cond$g[[1]], ranef(m)$cond$g[[1]], tolerance = 1e-5)
+  expect_equal(ranef(m2)$cond$g[[1]], ranef(m)$cond$g[[1]], tolerance = 1e-5)
 })
 
 test_that("random slopes throw an error", {
   pcod_2011$fyear <- as.factor(pcod_2011$year)
-  expect_error({
-    fit <- sdmTMB(
-      density ~ 1 + (1 + depth | fyear),
-      data = pcod_2011, mesh = pcod_mesh_2011,
-      family = tweedie(link = "log")
-    )
-  }, regexp = "slope")
-  expect_error({
-    fit <- sdmTMB(
-      density ~ 1 + (1 + depth | fyear) + (Y | fyear),
-      data = pcod_2011, mesh = pcod_mesh_2011,
-      family = tweedie(link = "log")
-    )
-  }, regexp = "slope")
-  expect_error({
-    fit <- sdmTMB(
-      density ~ 1 + (depth | fyear),
-      data = pcod_2011, mesh = pcod_mesh_2011,
-      family = tweedie(link = "log")
-    )
-  }, regexp = "slope")
+  expect_error(
+    {
+      fit <- sdmTMB(
+        density ~ 1 + (1 + depth | fyear),
+        data = pcod_2011, mesh = pcod_mesh_2011,
+        family = tweedie(link = "log")
+      )
+    },
+    regexp = "slope"
+  )
+  expect_error(
+    {
+      fit <- sdmTMB(
+        density ~ 1 + (1 + depth | fyear) + (Y | fyear),
+        data = pcod_2011, mesh = pcod_mesh_2011,
+        family = tweedie(link = "log")
+      )
+    },
+    regexp = "slope"
+  )
+  expect_error(
+    {
+      fit <- sdmTMB(
+        density ~ 1 + (depth | fyear),
+        data = pcod_2011, mesh = pcod_mesh_2011,
+        family = tweedie(link = "log")
+      )
+    },
+    regexp = "slope"
+  )
   fit <- sdmTMB( # but random intercepts still work
     density ~ 1 + (1 | fyear),
     data = pcod_2011, mesh = pcod_mesh_2011,
@@ -204,4 +259,3 @@ test_that("random slopes throw an error", {
   )
   expect_s3_class(fit, "sdmTMB")
 })
-

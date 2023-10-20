@@ -18,7 +18,8 @@ enum valid_family {
   truncated_nbinom1_family  = 11,
   censored_poisson_family  = 12,
   gamma_mix_family = 13,
-  lognormal_mix_family = 14
+  lognormal_mix_family = 14,
+  nbinom2_mix_family = 15
 };
 
 enum valid_link {
@@ -127,6 +128,7 @@ Type objective_function<Type>::operator()()
   DATA_IMATRIX(proj_RE_indexes);
   DATA_IVECTOR(nobs_RE);
   DATA_IVECTOR(ln_tau_G_index);
+  DATA_INTEGER(n_g); // number of random intercepts
 
   DATA_SPARSE_MATRIX(A_st); // INLA 'A' projection matrix for unique stations
   DATA_IVECTOR(A_spatial_index); // Vector of stations to match up A_st output
@@ -154,10 +156,12 @@ Type objective_function<Type>::operator()()
   DATA_MATRIX(priors_b_Sigma); // beta priors matrix
   DATA_INTEGER(priors_b_n);
   DATA_IVECTOR(priors_b_index);
+  DATA_MATRIX(priors_sigma_G); // random intercept SD
   DATA_VECTOR(priors); // all other priors as a vector
   DATA_IVECTOR(ar1_fields);
   DATA_IVECTOR(rw_fields);
-  DATA_INTEGER(include_spatial);
+  DATA_IVECTOR(include_spatial); // include spatial intercept field(s)?
+  DATA_INTEGER(omit_spatial_intercept);
   DATA_INTEGER(random_walk);
   DATA_INTEGER(ar1_time);
   DATA_IVECTOR(exclude_RE); // DELTA TODO currently shared...
@@ -191,8 +195,8 @@ Type objective_function<Type>::operator()()
   DATA_MATRIX(proj_z_i);
   DATA_IVECTOR(proj_spatial_index);
 
-  DATA_IVECTOR(spatial_only);
-  DATA_INTEGER(spatial_covariate);
+  DATA_IVECTOR(spatial_only); // !spatial_only means include spatiotemporal(!)
+  DATA_INTEGER(spatial_covariate); // include SVC?
 
   DATA_VECTOR(X_threshold);
   DATA_VECTOR(proj_X_threshold);
@@ -289,27 +293,24 @@ Type objective_function<Type>::operator()()
   }
 
   // DELTA DONE
-  vector<Type> sigma_O(n_m);
+  array<Type> sigma_O(1,n_m); // array b/c ADREPORT crashes if vector elements mapped
+  array<Type> log_sigma_O(1,n_m); // array b/c ADREPORT crashes if vector elements mapped
   int n_z = ln_tau_Z.rows();
   array<Type> sigma_Z(n_z, n_m);
-  if (include_spatial) {
-    for (int m = 0; m < n_m; m++) {
-      sigma_O(m) = sdmTMB::calc_rf_sigma(ln_tau_O(m), ln_kappa(0,m));
+  array<Type> log_sigma_Z(n_z,n_m); // for SE
+  for (int m = 0; m < n_m; m++) {
+    if (include_spatial(m)) {
+      sigma_O(0,m) = sdmTMB::calc_rf_sigma(ln_tau_O(m), ln_kappa(0,m));
+      log_sigma_O(0,m) = log(sigma_O(0,m));
+    }
+    if (spatial_covariate) {
       for (int z = 0; z < n_z; z++) {
         sigma_Z(z,m) = sdmTMB::calc_rf_sigma(ln_tau_Z(z,m), ln_kappa(0,m));
       }
-    }
-    vector<Type> log_sigma_O = log(sigma_O);
-    ADREPORT(log_sigma_O);
-    REPORT(sigma_O);
-    ADREPORT(sigma_O);
-    array<Type> log_sigma_Z(n_z,n_m); // for SE
     for (int z = 0; z < n_z; z++)
       for (int m = 0; m < n_m; m++)
         log_sigma_Z(z,m) = log(sigma_Z(z,m));
-    ADREPORT(log_sigma_Z);
-    REPORT(sigma_Z);
-    ADREPORT(sigma_Z);
+    }
   }
 
   // TODO can we not always run this for speed?
@@ -396,19 +397,22 @@ Type objective_function<Type>::operator()()
 
   // Spatial (intercept) random effects:
   for (int m = 0; m < n_m; m++) {
+  if (include_spatial(m)) {
     Eigen::SparseMatrix<Type> Q_temp; // Precision matrix
-    if (include_spatial) {
+    if (include_spatial(m)) {
       if (m == 0) {
         Q_temp = Q_s;
       } else {
         Q_temp = Q_s2;
       }
-      PARALLEL_REGION jnll += SCALE(GMRF(Q_temp, s), 1. / exp(ln_tau_O(m)))(omega_s.col(m));
-      if (sim_re(0)) {
-        vector<Type> omega_s_tmp(omega_s.rows());
-        SIMULATE {
-          GMRF(Q_temp, s).simulate(omega_s_tmp);
-          omega_s.col(m) = omega_s_tmp / exp(ln_tau_O(m));
+      if (!omit_spatial_intercept) {
+        PARALLEL_REGION jnll += SCALE(GMRF(Q_temp, s), 1. / exp(ln_tau_O(m)))(omega_s.col(m));
+        if (sim_re(0)) {
+          vector<Type> omega_s_tmp(omega_s.rows());
+          SIMULATE {
+            GMRF(Q_temp, s).simulate(omega_s_tmp);
+            omega_s.col(m) = omega_s_tmp / exp(ln_tau_O(m));
+          }
         }
       }
       if (spatial_covariate) {
@@ -424,6 +428,7 @@ Type objective_function<Type>::operator()()
         }
       }
     }
+  }
   }
 
   // Spatiotemporal random effects:
@@ -515,43 +520,63 @@ Type objective_function<Type>::operator()()
   // ------------------ Probability of random effects --------------------------
 
   // IID random intercepts:
+  array<Type> sigma_G(n_g,n_m);
   for (int m = 0; m < n_m; m++) {
-    for (int g = 0; g < RE.rows(); g++) {
-      PARALLEL_REGION jnll -= dnorm(RE(g,m), Type(0), exp(ln_tau_G(ln_tau_G_index(g), m)), true);
-      if (sim_re(3)) SIMULATE{RE(g,m) = rnorm(Type(0), exp(ln_tau_G(ln_tau_G_index(g),m)));
-      }
+    for (int h = 0; h < RE.rows(); h++) {
+      int g = ln_tau_G_index(h);
+      sigma_G(g,m) = exp(ln_tau_G(g,m));
+      PARALLEL_REGION jnll -= dnorm(RE(h,m), Type(0), sigma_G(g,m), true);
+      if (sim_re(3)) SIMULATE{RE(h,m) = rnorm(Type(0), sigma_G(g,m));}
     }
   }
 
-  // Random walk effects (dynamic regression):
-  if (random_walk || ar1_time) {
+  array<Type> sigma_V(X_rw_ik.cols(),n_m);
+  // Time-varying effects (dynamic regression):
+  if (random_walk == 1 || ar1_time || random_walk == 2) {
     array<Type> rho_time(X_rw_ik.cols(), n_m);
     rho_time.setZero();
     for (int m = 0; m < n_m; m++) {
       for (int k = 0; k < X_rw_ik.cols(); k++) {
-        // flat prior on the initial value... then:
-        if (random_walk) {
+        sigma_V(k,m) = exp(ln_tau_V(k,m));
+        if (random_walk == 1) { // type = 'rw'
+          // flat prior on the initial value... then:
           for (int t = 1; t < n_t; t++) {
             PARALLEL_REGION jnll -=
-              dnorm(b_rw_t(t, k, m), b_rw_t(t - 1, k, m), exp(ln_tau_V(k,m)), true);
+              dnorm(b_rw_t(t, k, m), b_rw_t(t - 1, k, m), sigma_V(k,m), true);
             if (sim_re(4) && simulate_t(t))
-              SIMULATE{b_rw_t(t, k, m) = rnorm(b_rw_t(t - 1, k, m), exp(ln_tau_V(k,m)));}
+              SIMULATE{b_rw_t(t, k, m) = rnorm(b_rw_t(t - 1, k, m), sigma_V(k,m));}
           }
-        }
-        if (ar1_time) {
+        } else if (random_walk == 2) { // type = 'rw0'
+          // N(0, SD) prior on the initial value... then:
+          for (int t = 0; t < n_t; t++) {
+            if (t == 0) {
+              PARALLEL_REGION jnll -=
+                dnorm(b_rw_t(t, k, m), Type(0.), sigma_V(k,m), true);
+              if (sim_re(4) && simulate_t(t))
+                SIMULATE{b_rw_t(t, k, m) = rnorm(Type(0.), sigma_V(k,m));}
+            } else {
+              PARALLEL_REGION jnll -=
+                dnorm(b_rw_t(t, k, m), b_rw_t(t - 1, k, m), sigma_V(k,m), true);
+              if (sim_re(4) && simulate_t(t))
+                SIMULATE{b_rw_t(t, k, m) = rnorm(b_rw_t(t - 1, k, m), sigma_V(k,m));}
+            }
+          }
+        } else if (ar1_time) { // type = 'ar1'
           rho_time(k, m) = sdmTMB::minus_one_to_one(rho_time_unscaled(k, m));
-          jnll += SCALE(AR1(rho_time(k, m)), exp(ln_tau_V(k, m)))(vector<Type>(b_rw_t.col(m).col(k)));
+          jnll += SCALE(AR1(rho_time(k, m)), sigma_V(k,m))(vector<Type>(b_rw_t.col(m).col(k)));
           if (sim_re(4)) {
-              // https://kaskr.github.io/adcomp/classdensity_1_1AR1__t.html
-              vector<Type> tmp(n_t);
-              Type ar1_sigma = sqrt(Type(1) - rho_time(k, m) * rho_time(k, m));
-              Type x0 = rnorm(Type(0), exp(ln_tau_V(k, m)));
-              tmp(0) = rho_time(k, m) * x0 + ar1_sigma * rnorm(Type(0), exp(ln_tau_V(k, m)));
-              for (int t = 1; t < n_t; t++)
-                tmp(t) = rho_time(k, m) * tmp(t-1) + ar1_sigma * rnorm(Type(0), exp(ln_tau_V(k, m)));
-              for(int t = 0; t < n_t; t++)
-                if (simulate_t(t)) SIMULATE{b_rw_t(t, k, m) = tmp(t);}
+            // https://kaskr.github.io/adcomp/classdensity_1_1AR1__t.html
+            vector<Type> tmp(n_t);
+            Type ar1_sigma = sqrt(Type(1) - rho_time(k, m) * rho_time(k, m));
+            Type x0 = rnorm(Type(0), sigma_V(k,m));
+            tmp(0) = rho_time(k, m) * x0 + ar1_sigma * rnorm(Type(0), sigma_V(k,m));
+            for (int t = 1; t < n_t; t++)
+              tmp(t) = rho_time(k, m) * tmp(t-1) + ar1_sigma * rnorm(Type(0), sigma_V(k,m));
+            for(int t = 0; t < n_t; t++)
+              if (simulate_t(t)) SIMULATE{b_rw_t(t, k, m) = tmp(t);}
           }
+        } else {
+          error("Time-varying type not found.");
         }
       }
     }
@@ -574,7 +599,7 @@ Type objective_function<Type>::operator()()
       for (int t = 0; t < n_t; t++)
         if (!spatial_only(m)) epsilon_st_A.col(m).col(t) =
           A_st * vector<Type>(epsilon_st.col(m).col(t));
-      omega_s_A.col(m) = A_st * vector<Type>(omega_s.col(m));
+      if (!omit_spatial_intercept) omega_s_A.col(m) = A_st * vector<Type>(omega_s.col(m));
       for (int z = 0; z < n_z; z++)
         zeta_s_A.col(m).col(z) = A_st * vector<Type>(zeta_s.col(m).col(z));
     }
@@ -633,6 +658,8 @@ Type objective_function<Type>::operator()()
   mu_i.setZero();
   eta_i.setZero();
 
+  vector<Type> poisson_link_m0_ll(n_i);
+
   // combine parts:
   for (int m = 0; m < n_m; m++) {
     for (int i = 0; i < n_i; i++) {
@@ -640,7 +667,7 @@ Type objective_function<Type>::operator()()
       if ((n_m == 2 && m == 1) || n_m == 1) {
         if (!poisson_link_delta) eta_i(i,m) += offset_i(i);
       }
-      if (random_walk || ar1_time) {
+      if (random_walk == 1 || ar1_time || random_walk == 2) {
         for (int k = 0; k < X_rw_ik.cols(); k++) {
           eta_rw_i(i,m) += X_rw_ik(i, k) * b_rw_t(year_i(i), k, m); // record it
           eta_i(i,m) += eta_rw_i(i,m);
@@ -648,12 +675,13 @@ Type objective_function<Type>::operator()()
       }
 
       // Spatially varying effects:
-      if (include_spatial) {
-        eta_i(i,m) += omega_s_A(i,m);  // spatial omega
-        if (spatial_covariate)
-          for (int z = 0; z < n_z; z++)
-            eta_i(i,m) += zeta_s_A(i,z,m) * z_i(i,z); // spatially varying covariate DELTA
+      if (include_spatial(m)) {
+        if (!omit_spatial_intercept) // FIXME needs to be an n_m vector??
+          eta_i(i,m) += omega_s_A(i,m);  // spatial omega
       }
+      if (spatial_covariate)
+        for (int z = 0; z < n_z; z++)
+          eta_i(i,m) += zeta_s_A(i,z,m) * z_i(i,z); // spatially varying covariate DELTA
       if (!no_spatial) epsilon_st_A_vec(i,m) = epsilon_st_A(A_spatial_index(i), year_i(i),m); // record it
       eta_i(i,m) += epsilon_st_A_vec(i,m); // spatiotemporal
 
@@ -667,22 +695,25 @@ Type objective_function<Type>::operator()()
         }
       }
       eta_i(i,m) += eta_iid_re_i(i,m);
-
-      // bool poisson_link_delta = false;
-      // if (n_m > 1) if (family(0) == 1 && family(1) == 4 && link(0) == 1 && link(1) == 1)
-      //     poisson_link_delta = true;
-
       if (family(m) == 1 && !poisson_link_delta) { // regular binomial
-        // binomial(link = "logit"); don't touch (using robust density function in logit space)
         mu_i(i,m) = LogitInverseLink(eta_i(i,m), link(m));
-      } else if (poisson_link_delta) { // clogog, but put in logit space for robust density function:
-        Type n = exp(eta_i(i,0));
-        // Type p = Type(1) - exp(-exp(offset_i(i)) * n);
-        Type p = Type(1) - exp(-exp(offset_i(i) + eta_i(i,0)));
-        if (m == 0) mu_i(i,0) = logit(p);
-        // if (m == 1) mu_i(i,1) = (n/p) * exp(eta_i(i,1));
-        if (m == 1) mu_i(i,1) = exp(log(n/p) + eta_i(i,1));
-      } else {
+      } else if (poisson_link_delta) { // a tweak on clogog:
+        // eta_i(i,0) = log numbers density
+        // eta_i(i,1) = log average weight
+        // mu_i(i,0) = probability of occurrence (kept in logit space within .cpp)
+        // mu_i(i,1) = positive density prediction
+        Type log_one_minus_p = -exp(offset_i(i) + eta_i(i,0));
+        Type log_p = logspace_sub(Type(0.0), log_one_minus_p);
+        if (m == 0) {
+          if (y_i(i,0) > Type(0.0)) {
+            poisson_link_m0_ll(i) = log_p; // calc ll here; more robust than dbinom_robust(logit(p))
+          } else {
+            poisson_link_m0_ll(i) = log_one_minus_p; // log(1 - p)
+          }
+          mu_i(i,1) = logit(exp(log_p)); // just for recording; not used in ll b/c robustness
+        }
+        if (m == 1) mu_i(i,1) = exp(offset_i(i) + eta_i(i,0) + eta_i(i,1) - log_p);
+      } else { // all the regular stuff:
         mu_i(i,m) = InverseLink(eta_i(i,m), link(m));
       }
     }
@@ -694,40 +725,76 @@ Type objective_function<Type>::operator()()
   // close to zero: use for count data (cf binomial()$initialize)
 #define zt_lik_nearzero(x,loglik_exp) ((x < Type(0.001)) ? -INFINITY : loglik_exp)
 
-  Type s1, s2, s3, lognzprob, tmp_ll, ll_1, ll_2, p_mix, mix_ratio, ll_max;
+  Type s1, s2, s3, lognzprob, tmp_ll, ll_1, ll_2, p_mix, mix_ratio, tweedie_p, s1_large, s2_large;
+
+  // calcs for mix distr. first:
+  int mix_model;
+  if (n_m > 1) {
+    mix_model = 1;
+  } else {
+    mix_model = 0;
+  }
+  vector<Type> mu_i_large(n_i);
+  switch (family(mix_model)) {
+  case gamma_mix_family:
+  case lognormal_mix_family:
+  case nbinom2_mix_family: {
+    p_mix = invlogit(logit_p_mix); // probability of larger event
+    mix_ratio = exp(log_ratio_mix) + Type(1.); // ratio of large:small values, constrained > 1.0
+    for (int i = 0; i < n_i; i++) {
+      mu_i_large(i) = exp(log(mu_i(i, mix_model)) + log(mix_ratio));  // mean of large component = mean of smaller * ratio
+    }
+    break;
+  }
+  default:
+    break;
+  }
+
+  vector<Type> jnll_obs(n_i); // for cross validation
+  jnll_obs.setZero();
   REPORT(phi);
   for (int m = 0; m < n_m; m++) PARALLEL_REGION {
     for (int i = 0; i < n_i; i++) {
       if (!sdmTMB::isNA(y_i(i,m))) {
         switch (family(m)) {
-          case gaussian_family:
+          case gaussian_family: {
             tmp_ll = dnorm(y_i(i,m), mu_i(i,m), phi(m), true);
             SIMULATE{y_i(i,m) = rnorm(mu_i(i,m), phi(m));}
             break;
-          case tweedie_family:
-            s1 = invlogit(thetaf) + Type(1.0);
+          }
+          case tweedie_family: {
+            tweedie_p = invlogit(thetaf) + Type(1.0);
             if (!sdmTMB::isNA(priors(12))) {
               jnll -= dnorm(s1, priors(12), priors(13), true);
               // derivative: https://www.wolframalpha.com/input?i=e%5Ex%2F%281%2Be%5Ex%29+%2B+1
               if (stan_flag) jnll -= thetaf - 2 * log(1 + exp(thetaf)); // Jacobian adjustment
             }
-            tmp_ll = dtweedie(y_i(i,m), mu_i(i,m), phi(m), s1, true);
-            SIMULATE{y_i(i,m) = rtweedie(mu_i(i,m), phi(m), s1);}
+            tmp_ll = dtweedie(y_i(i,m), mu_i(i,m), phi(m), tweedie_p, true);
+            SIMULATE{y_i(i,m) = rtweedie(mu_i(i,m), phi(m), tweedie_p);}
             break;
-          case binomial_family:
-            tmp_ll = dbinom_robust(y_i(i,m), size(i), mu_i(i,m), true);
+          }
+          case binomial_family: {
+            if (poisson_link_delta) {
+              // needed for robustness; must be first model component
+              tmp_ll = poisson_link_m0_ll(i);
+            } else {
+              tmp_ll = dbinom_robust(y_i(i,m), size(i), mu_i(i,m), true);
+            }
             // SIMULATE{y_i(i,m) = rbinom(size(i), InverseLink(mu_i(i,m), link(m)));}
             SIMULATE{y_i(i,m) = rbinom(size(i), invlogit(mu_i(i,m)));} // hardcoded invlogit b/c mu_i in logit space
             break;
-          case poisson_family:
+          }
+          case poisson_family: {
             tmp_ll = dpois(y_i(i,m), mu_i(i,m), true);
             SIMULATE{y_i(i,m) = rpois(mu_i(i,m));}
             break;
-          case censored_poisson_family:
-            tmp_ll = sdmTMB::dcenspois(y_i(i,m), mu_i(i,m), lwr(i), upr(i), true);
+          }
+          case censored_poisson_family: {
+            tmp_ll = sdmTMB::dcenspois2(y_i(i,m), mu_i(i,m), upr(i), true);
             SIMULATE{y_i(i,m) = rpois(mu_i(i,m));}
             break;
-          case Gamma_family:
+          }
+          case Gamma_family: {
             s1 = exp(ln_phi(m));        // shape
             s2 = mu_i(i,m) / s1;        // scale
             tmp_ll = dgamma(y_i(i,m), s1, s2, true);
@@ -735,7 +802,8 @@ Type objective_function<Type>::operator()()
             // s1 = Type(1) / (pow(phi, Type(2)));  // s1=shape, ln_phi=CV,shape=1/CV^2
             // tmp_ll = dgamma(y_i(i,m), s1, mu_i(i,m) / s1, true);
             break;
-          case nbinom2_family:
+          }
+          case nbinom2_family: {
             s1 = log(mu_i(i,m)); // log(mu_i)
             s2 = 2. * s1 - ln_phi(m); // log(var - mu)
             tmp_ll = dnbinom_robust(y_i(i,m), s1, s2, true);
@@ -745,7 +813,8 @@ Type objective_function<Type>::operator()()
               y_i(i,m) = rnbinom2(s1, s2);
             }
             break;
-          case truncated_nbinom2_family:
+          }
+          case truncated_nbinom2_family: {
             s1 = log(mu_i(i,m)); // log(mu_i)
             s2 = 2. * s1 - ln_phi(m); // log(var - mu)
             tmp_ll = dnbinom_robust(y_i(i,m), s1, s2, true);
@@ -755,13 +824,15 @@ Type objective_function<Type>::operator()()
             tmp_ll = zt_lik_nearzero(y_i(i,m), tmp_ll); // from glmmTMB
             SIMULATE{y_i(i,m) = sdmTMB::rtruncated_nbinom(asDouble(phi(m)), 0, asDouble(mu_i(i,m)));}
             break;
-          case nbinom1_family:
+          }
+          case nbinom1_family: {
             s1 = log(mu_i(i,m));
             s2 = s1 + ln_phi(m);
             tmp_ll = dnbinom_robust(y_i(i,m), s1, s2, true);
             SIMULATE {y_i(i,m) = rnbinom2(mu_i(i,m), mu_i(i,m) * (Type(1) + phi(m)));}
             break;
-          case truncated_nbinom1_family:
+          }
+          case truncated_nbinom1_family: {
             s1 = log(mu_i(i,m));
             s2 = s1 + ln_phi(m);
             tmp_ll = dnbinom_robust(y_i(i,m), s1, s2, true);
@@ -771,71 +842,75 @@ Type objective_function<Type>::operator()()
             tmp_ll = zt_lik_nearzero(y_i(i,m), tmp_ll);
             SIMULATE{y_i(i,m) = sdmTMB::rtruncated_nbinom(asDouble(mu_i(i,m)/phi(m)), 0, asDouble(mu_i(i,m)));}
             break;
-          case lognormal_family:
+          }
+          case lognormal_family: {
             tmp_ll = sdmTMB::dlnorm(y_i(i,m), log(mu_i(i,m)) - pow(phi(m), Type(2)) / Type(2), phi(m), true);
             SIMULATE{y_i(i,m) = exp(rnorm(log(mu_i(i,m)) - pow(phi(m), Type(2)) / Type(2), phi(m)));}
             break;
-          case student_family:
+          }
+          case student_family: {
             tmp_ll = sdmTMB::dstudent(y_i(i,m), mu_i(i,m), exp(ln_phi(m)), df, true);
             SIMULATE{y_i(i,m) = mu_i(i,m) + phi(m) * rt(df);}
             break;
-          case Beta_family: // Ferrari and Cribari-Neto 2004; betareg package
+          }
+          case Beta_family: { // Ferrari and Cribari-Neto 2004; betareg package
             s1 = mu_i(i,m) * phi(m);
             s2 = (Type(1) - mu_i(i,m)) * phi(m);
             tmp_ll = dbeta(y_i(i,m), s1, s2, true);
             SIMULATE{y_i(i,m) = rbeta(s1, s2);}
             break;
-          case gamma_mix_family:
-            p_mix = invlogit(logit_p_mix); // probability of larger event
+          }
+          case gamma_mix_family: {
             s1 = exp(ln_phi(m));        // shape
             s2 = mu_i(i,m) / s1;        // scale
-            ll_1 = log(Type(1.0 - p_mix)) + dgamma(y_i(i,m), s1, s2, true);
-
-            mix_ratio = exp(log_ratio_mix) + 1.0; // ratio of large:small values, constrained > 1.0
-            s3 = s2 * mix_ratio; // mean of large component = mean of smaller * ratio
-            ll_2 = log(p_mix) + dgamma(y_i(i,m), s1, s3, true);
-
-            ll_max = ll_1; // determine larger of ll_1 and ll_2
-            if(ll_2 > ll_1) ll_max = ll_2;
-
-            tmp_ll = ll_max + log(exp(ll_1 - ll_max) + exp(ll_2 - ll_max)); // log sum exp function
-
+            ll_1 = log(Type(1. - p_mix)) + dgamma(y_i(i,m), s1, s2, true);
+            s2_large = mu_i_large(i) / s1;    // scale
+            ll_2 = log(p_mix) + dgamma(y_i(i,m), s1, s2_large, true);
+            tmp_ll = sdmTMB::log_sum_exp(ll_1, ll_2);
             SIMULATE{
               if(rbinom(Type(1),p_mix) == 0) {
                 y_i(i,m) = rgamma(s1, s2);
               } else {
-                y_i(i,m) = rgamma(s1, s3);
+                y_i(i,m) = rgamma(s1, s2_large);
               }
             }
-            // s1 = Type(1) / (pow(phi, Type(2)));  // s1=shape, ln_phi=CV,shape=1/CV^2
-            // tmp_ll = dgamma(y_i(i,m), s1, mu_i(i,m) / s1, true);
             break;
-        case lognormal_mix_family:
-          p_mix = invlogit(logit_p_mix); // probability of larger event
-
-          ll_1 = log(Type(1.0 - p_mix)) + sdmTMB::dlnorm(y_i(i,m), log(mu_i(i,m)) - pow(phi(m), Type(2)) / Type(2), phi(m), true);
-          mix_ratio = exp(log_ratio_mix) + 1.0; // ratio of large:small values, constrained > 1.0
-          ll_2 = log(p_mix) + sdmTMB::dlnorm(y_i(i,m), log(mix_ratio) + log(mu_i(i,m)) - pow(phi(m), Type(2)) / Type(2), phi(m), true);
-
-          ll_max = ll_1; // determine larger of ll_1 and ll_2
-          if(ll_2 > ll_1) ll_max = ll_2;
-
-          tmp_ll = ll_max + log(exp(ll_1 - ll_max) + exp(ll_2 - ll_max)); // log sum exp function
-
+          }
+        case lognormal_mix_family: {
+          ll_1 = log(Type(1. - p_mix)) + sdmTMB::dlnorm(y_i(i,m), log(mu_i(i,m)) - pow(phi(m), Type(2)) / Type(2), phi(m), true);
+          ll_2 = log(p_mix) + sdmTMB::dlnorm(y_i(i,m), log(mu_i_large(i)) - pow(phi(m), Type(2)) / Type(2), phi(m), true);
+          tmp_ll = sdmTMB::log_sum_exp(ll_1, ll_2);
           SIMULATE{
-            if(rbinom(Type(1),p_mix) == 0) {
+            if (rbinom(Type(1), p_mix) == 0) {
               y_i(i,m) = exp(rnorm(log(mu_i(i,m)) - pow(phi(m), Type(2)) / Type(2), phi(m)));;
             } else {
-              y_i(i,m) = exp(rnorm(log(mix_ratio) + log(mu_i(i,m)) - pow(phi(m), Type(2)) / Type(2), phi(m)));;
+              y_i(i,m) = exp(rnorm(log(mu_i_large(i)) - pow(phi(m), Type(2)) / Type(2), phi(m)));;
             }
           }
-          // s1 = Type(1) / (pow(phi, Type(2)));  // s1=shape, ln_phi=CV,shape=1/CV^2
-          // tmp_ll = dgamma(y_i(i,m), s1, mu_i(i,m) / s1, true);
           break;
-          default:
-            error("Family not implemented.");
+        }
+        case nbinom2_mix_family: {
+          s1 = log(mu_i(i,m)); // log(mu_i)
+          s2 = Type(2.) * s1 - ln_phi(m); // log(var - mu)
+          Type s1_large = log(mu_i_large(i));
+          Type s2_large = Type(2.) * s1_large - ln_phi(m);
+          ll_1 = log(Type(1. - p_mix)) + dnbinom_robust(y_i(i,m), s1, s2, true);
+          ll_2 = log(p_mix) + dnbinom_robust(y_i(i,m), s1_large, s2_large, true);
+          tmp_ll = sdmTMB::log_sum_exp(ll_1, ll_2);
+          SIMULATE{
+            if (rbinom(Type(1), p_mix) == 0) {
+              y_i(i,m) = rnbinom2(s1, s2);
+            } else {
+              y_i(i,m) = rnbinom2(s1_large, s2_large);
+            }
+          }
+          break;
+        }
+        default:
+          error("Family not implemented.");
         }
         tmp_ll *= weights_i(i);
+        jnll_obs(i) -= tmp_ll; // for cross validation
         jnll -= tmp_ll; // * keep
       }
     }
@@ -892,6 +967,16 @@ Type objective_function<Type>::operator()()
       // https://www.wolframalpha.com/input?i=2+*+%28e%5Ex%2F%281%2Be%5Ex%29%29+-+1
       // log abs derivative = log((2 * exp(x)) / (1 + exp(x))^2)
       if (stan_flag) jnll -= log(2.) + ar1_phi(m) - 2. * log(1. + exp(ar1_phi(m)));
+    }
+    if (priors_sigma_G.rows() != sigma_G.rows())
+      error("sigma_G prior dimensions are incorrect");
+    for (int m = 0; m < n_m; m++) {
+      for (int g = 0; g < sigma_G.rows(); g++) {
+        if (!sdmTMB::isNA(priors_sigma_G(g,0)) && !sdmTMB::isNA(priors_sigma_G(g,1))) {
+          jnll -= dnorm(sigma_G(g,m), priors_sigma_G(g,0), priors_sigma_G(g,1), true);
+          if (stan_flag) jnll -= log(sigma_G(g,m)); // Jacobian adjustment
+        }
+      }
     }
   }
 
@@ -967,7 +1052,7 @@ Type objective_function<Type>::operator()()
     // Random walk covariates:
     array<Type> proj_rw_i(n_p,n_m);
     proj_rw_i.setZero();
-    if (random_walk || ar1_time) {
+    if (random_walk == 1 || ar1_time || random_walk == 2) {
       for (int m = 0; m < n_m; m++) {
         for (int i = 0; i < proj_X_rw_ik.rows(); i++) {
           for (int k = 0; k < proj_X_rw_ik.cols(); k++) {
@@ -1000,7 +1085,7 @@ Type objective_function<Type>::operator()()
         for (int t = 0; t < n_t; t++) {
           proj_epsilon_st_A_unique.col(m).col(t) = proj_mesh * vector<Type>(epsilon_st.col(m).col(t));
         }
-        proj_omega_s_A_unique.col(m) = proj_mesh * vector<Type>(omega_s.col(m));
+        if (!omit_spatial_intercept) proj_omega_s_A_unique.col(m) = proj_mesh * vector<Type>(omega_s.col(m));
       }
 
       // Spatially varying coefficients:
@@ -1034,6 +1119,8 @@ Type objective_function<Type>::operator()()
       }
     }
 
+
+
     // for (int m = 0; m < n_m; m++) {
     //   for (int i = 0; i < n_i; i++) {
     //     if ((n_m == 2 && m == 2) || n_m == 1) proj_fe(i,m) += proj_offset_i(i);
@@ -1052,6 +1139,35 @@ Type objective_function<Type>::operator()()
       // proj_fe includes s(), RW, and IID random effects:
     for (int m = 0; m < n_m; m++)
       proj_eta.col(m) = proj_fe.col(m) + proj_rf.col(m);
+
+    // for families that implement mixture models, adjust proj_eta by
+    // proportion and ratio of means
+    // (1 - p_mix) * mu_i(i,m) + p_mix * (mu(i,m) * mix_ratio);
+    switch (family(mix_model)) {
+      case gamma_mix_family:
+      case lognormal_mix_family:
+      case nbinom2_mix_family:
+        proj_eta.col(mix_model) = log((1. - p_mix) * exp(proj_eta.col(mix_model)) + // regular part
+               p_mix * exp(proj_eta.col(mix_model)) * mix_ratio); //large part
+        break;
+      default:
+        break;
+    }
+
+    if (n_m > 1 && pop_pred) { // grab SE on fixed effects combined if delta model:
+      Type t1, t2;
+      vector<Type> proj_rf_delta(n_p);
+      for (int i = 0; i < n_p; i++) {
+        if (poisson_link_delta) {
+          proj_rf_delta(i) = proj_fe(i,0) + proj_fe(i,1); // check
+        } else {
+          t1 = InverseLink(proj_fe(i,0), link(0));
+          t2 = InverseLink(proj_fe(i,1), link(1));
+          proj_rf_delta(i) = Link(t1 * t2, link(1));
+        }
+      }
+      if (calc_se) ADREPORT(proj_rf_delta);
+    }
 
     // FIXME save memory by not reporting all these or optionally so for MVN/Bayes?
     REPORT(proj_fe);            // fixed effect projections
@@ -1202,16 +1318,19 @@ Type objective_function<Type>::operator()()
       log_range(i,m) = log(range(i,m));
     }
   }
+  array<Type> log_sigma_E(sigma_E.rows(),sigma_E.cols()); // for SE
+  for (int i = 0; i < sigma_E.rows(); i++) {
+    for (int m = 0; m < sigma_E.cols(); m++) {
+      log_sigma_E(i,m) = log(sigma_E(i,m));
+    }
+  }
 
   ADREPORT(logit_p_mix);
   ADREPORT(log_ratio_mix);
+  ADREPORT(tweedie_p);
   REPORT(p_mix);
   REPORT(mix_ratio);
   ADREPORT(phi);
-  vector<Type> log_sigma_E = log(sigma_E);
-  ADREPORT(log_sigma_E);      // log spatio-temporal SD
-  REPORT(sigma_E);      // spatio-temporal SD
-  ADREPORT(sigma_E);      // log spatio-temporal SD
   REPORT(epsilon_st_A_vec);   // spatio-temporal effects; vector
   REPORT(b_rw_t);   // time-varying effects
   REPORT(omega_s_A);      // spatial effects; n_s length vector
@@ -1228,6 +1347,22 @@ Type objective_function<Type>::operator()()
   ADREPORT(log_range);  // log Matern approximate distance at 10% correlation
   REPORT(b_smooth);     // smooth coefficients for penalized splines
   REPORT(ln_smooth_sigma); // standard deviations of smooth random effects, in log-space
+  REPORT(jnll_obs); // for cross validation
+
+  REPORT(sigma_O);
+  ADREPORT(sigma_O);
+  ADREPORT(log_sigma_O);
+  REPORT(sigma_Z);
+  ADREPORT(sigma_Z);
+  ADREPORT(log_sigma_Z);
+  REPORT(sigma_E);      // spatio-temporal SD
+  ADREPORT(sigma_E);
+  ADREPORT(log_sigma_E);      // log spatio-temporal SD
+  REPORT(sigma_V);
+  REPORT(sigma_G);
+  ADREPORT(sigma_V); // time-varying SD
+  ADREPORT(sigma_G); // time-varying SD
+
   SIMULATE {
     REPORT(y_i);
     REPORT(omega_s);

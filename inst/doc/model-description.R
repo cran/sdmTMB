@@ -53,6 +53,7 @@ symbols <- tibble::tribble(
   "$\\kappa_\\epsilon$", "`kappa(1)`", "Spatiotemporal decorrelation rate",
 
   "$\\rho$", "`ar1_rho`", "Correlation between random fields in subsequent time steps",
+  "$\\rho_{\\gamma}$", "`rho_time`", "Correlation between time-varying coefficients in subsequent time steps",
   "$\\boldsymbol{A}$", "`A`", "Sparse projection matrix to interpolate between knot and data locations",
   "$\\boldsymbol{H}$", "`H`", "2-parameter rotation matrix used to define anisotropy"
 )

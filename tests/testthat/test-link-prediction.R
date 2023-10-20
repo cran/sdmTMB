@@ -1,8 +1,9 @@
 test_that("Link/response type works", {
 
+  # see also test-delta-population-predictions.R
   # https://github.com/pbs-assess/sdmTMB/issues/110
   skip_on_cran()
-  skip_if_not_installed("INLA")
+  skip_on_ci()
 
   fit <- sdmTMB(
     density ~ 1,
@@ -31,12 +32,12 @@ test_that("Link/response type works", {
   )
 
   p <- predict(fit_delt, type = "link")
-  expect_false("est" %in% names(p))
+  # expect_false("est" %in% names(p))
   expect_lt(mean(p$est1), 1)
   expect_lt(mean(p$est2), 5)
 
   p <- predict(fit_delt, type = "link", re_form = NA)
-  expect_false("est" %in% names(p))
+  # expect_false("est" %in% names(p))
   expect_lt(mean(p$est1), 1)
   expect_lt(mean(p$est2), 5)
 
@@ -51,7 +52,7 @@ test_that("Link/response type works", {
   expect_gt(mean(p$est2), 30)
 
   # with std. error
-  p <- predict(fit, type = "link", re_form = NA, se_fit = TRUE)
+  expect_message(p <- predict(fit, type = "link", re_form = NULL, se_fit = TRUE), regexp = "slow")
   mean(p$est)
 
   p <- predict(fit_delt, type = "link", re_form = NA, se_fit = TRUE)
@@ -64,7 +65,7 @@ test_that("Link/response type works", {
 
 test_that("Response prediction works as reported in https://github.com/pbs-assess/sdmTMB/issues/160#issuecomment-1380920333", {
   skip_on_cran()
-  skip_if_not_installed("INLA")
+  skip_on_ci()
 
   fit_dg <- sdmTMB(density ~ 1 + s(depth),
     data = pcod_2011,

@@ -6,7 +6,7 @@
 \usage{
 \method{predict}{sdmTMB}(
   object,
-  newdata = object$data,
+  newdata = NULL,
   type = c("link", "response"),
   se_fit = FALSE,
   re_form = NULL,
@@ -15,11 +15,11 @@
   sims_var = "est",
   model = c(NA, 1, 2),
   offset = NULL,
-  tmbstan_model = deprecated(),
   mcmc_samples = NULL,
   return_tmb_object = FALSE,
   return_tmb_report = FALSE,
   return_tmb_data = FALSE,
+  tmbstan_model = deprecated(),
   sims = deprecated(),
   area = deprecated(),
   ...
@@ -39,7 +39,7 @@ fitted data.}
 given by \code{newdata} be calculated? Warning: the current implementation can
 be slow for large data sets or high-resolution projections unless
 \code{re_form = NA} (omitting random fields). A faster option to approximate
-point-wise uncertainty may be to use the \code{nsim} argument.}
+point-wise uncertainty is to use the \code{nsim} argument.}
 
 \item{re_form}{\code{NULL} to specify including all spatial/spatiotemporal random
 effects in predictions. \code{~0} or \code{NA} for population-level predictions.
@@ -51,15 +51,17 @@ predictions. \code{~0} or \code{NA} for population-level predictions. No other
 options (e.g., some but not all random intercepts) are implemented yet.
 Only affects predictions with \code{newdata}. This \emph{does} affects \code{\link[=get_index]{get_index()}}.}
 
-\item{nsim}{Experimental: If \verb{> 0}, simulate from the joint precision
+\item{nsim}{If \verb{> 0}, simulate from the joint precision
 matrix with \code{nsim} draws. Returns a matrix of \code{nrow(data)} by \code{nsim}
 representing the estimates of the linear predictor (i.e., in link space).
-Can be useful for deriving uncertainty on predictions (e.g., \code{apply(x, 1, sd)}) or propagating uncertainty. This is currently the fastest way to
-characterize uncertainty on predictions in space with sdmTMB.}
+Can be useful for deriving uncertainty on predictions
+(e.g., \code{apply(x, 1, sd)}) or propagating uncertainty. This is currently
+the fastest way to characterize uncertainty on predictions in space with
+sdmTMB.}
 
 \item{sims_var}{Experimental: Which TMB reported variable from the model
 should be extracted from the joint precision matrix simulation draws?
-Defaults to the link-space predictions. Options include: \code{"omega_s"},
+Defaults to link-space predictions. Options include: \code{"omega_s"},
 \code{"zeta_s"}, \code{"epsilon_st"}, and \code{"est_rf"} (as described below).
 Other options will be passed verbatim.}
 
@@ -67,31 +69,34 @@ Other options will be passed verbatim.}
 \code{mcmc_samples} is supplied: \code{NA} returns the combined prediction from both
 components on the link scale for the positive component; \code{1} or \code{2} return
 the first or second model component only on the link or response scale
-depending on the argument \code{type}.}
+depending on the argument \code{type}. For regular prediction from delta models,
+both sets of predictions are returned.}
 
 \item{offset}{A numeric vector of optional offset values. If left at default
 \code{NULL}, the offset is implicitly left at 0.}
 
-\item{tmbstan_model}{Deprecated. See \code{mcmc_samples}.}
-
 \item{mcmc_samples}{See \code{extract_mcmc()} in the
 \href{https://github.com/pbs-assess/sdmTMBextra}{sdmTMBextra} package for
-more details and the Bayesian vignette. If specified, the predict function
-will return a matrix of a similar form as if \code{nsim > 0} but representing
-Bayesian posterior samples from the Stan model.}
+more details and the
+\href{https://pbs-assess.github.io/sdmTMB/articles/web_only/bayesian.html}{Bayesian vignette}.
+If specified, the predict function will return a matrix of a similar form
+as if \code{nsim > 0} but representing Bayesian posterior samples from the Stan
+model.}
 
 \item{return_tmb_object}{Logical. If \code{TRUE}, will include the TMB object in a
 list format output. Necessary for the \code{\link[=get_index]{get_index()}} or \code{\link[=get_cog]{get_cog()}}
 functions.}
 
 \item{return_tmb_report}{Logical: return the output from the TMB
-report? For regular prediction this is all the reported variables
+report? For regular prediction, this is all the reported variables
 at the MLE parameter values. For \code{nsim > 0} or when \code{mcmc_samples}
 is supplied, this is a list where each element is a sample and the
 contents of each element is the output of the report for that sample.}
 
 \item{return_tmb_data}{Logical: return formatted data for TMB? Used
 internally.}
+
+\item{tmbstan_model}{Deprecated. See \code{mcmc_samples}.}
 
 \item{sims}{\strong{Deprecated}. Please use \code{nsim} instead.}
 
@@ -135,11 +140,11 @@ A matrix:
 }
 }
 \description{
-Make predictions from an sdmTMB model; can predict on the original or new
-data.
+Make predictions from an \pkg{sdmTMB} model; can predict on the original or
+new data.
 }
 \examples{
-\dontshow{if (ggplot2_installed() && inla_installed()) (if (getRversion() >= "3.4") withAutoprint else force)(\{ # examplesIf}
+\dontshow{if (ggplot2_installed()) (if (getRversion() >= "3.4") withAutoprint else force)(\{ # examplesIf}
 
 d <- pcod_2011
 mesh <- make_mesh(d, c("X", "Y"), cutoff = 30) # a coarse mesh for example speed
@@ -166,6 +171,7 @@ qqnorm(predictions$resids);abline(a = 0, b = 1)
 qcs_grid_2011 <- replicate_df(qcs_grid, "year", unique(pcod_2011$year))
 predictions <- predict(m, newdata = qcs_grid_2011)
 
+\donttest{
 # A short function for plotting our predictions:
 plot_map <- function(dat, column = est) {
   ggplot(dat, aes(X, Y, fill = {{ column }})) +
@@ -280,5 +286,6 @@ plot_map(p, exp(est_non_rf)) +
 plot_map(p, exp(est)) +
   ggtitle("Prediction (fixed effects + all random effects)") +
   scale_fill_viridis_c(trans = "sqrt")
+}
 \dontshow{\}) # examplesIf}
 }

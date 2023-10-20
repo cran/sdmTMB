@@ -204,7 +204,6 @@ if (suppressWarnings(require("INLA", quietly = TRUE))) {
 test_that("Censored Poisson fits", {
   skip_on_ci()
   skip_on_cran()
-  skip_if_not_installed("INLA")
   set.seed(1)
 
   predictor_dat <- data.frame(X = runif(300), Y = runif(300))
@@ -226,34 +225,43 @@ test_that("Censored Poisson fits", {
   m_nocens_pois <- sdmTMB(
     data = sim_dat, formula = observed ~ 1,
     mesh = mesh, family = censored_poisson(link = "log"),
-    experimental = list(upr = sim_dat$observed, lwr = sim_dat$observed)
+    control = sdmTMBcontrol(censored_upper = sim_dat$observed)
   )
-  expect_equal(m_nocens_pois$tmb_data$lwr, m_nocens_pois$tmb_data$upr)
-  expect_equal(m_nocens_pois$tmb_data$lwr, as.numeric(m_nocens_pois$tmb_data$y_i))
+  expect_equal(m_nocens_pois$tmb_data$y_i[,1], m_nocens_pois$tmb_data$upr)
   expect_equal(names(m_nocens_pois$tmb_data$family), "censored_poisson")
   expect_equal(m_pois$model, m_nocens_pois$model)
 
-  # left-censored version
-  L_1 <- 5 # zeros and ones cannot be observed directly - observed as <= L1
-  y <- sim_dat$observed
-  lwr <- ifelse(y <= L_1, 0, y)
-  upr <- ifelse(y <= L_1, L_1, y)
-  m_left_cens_pois <- sdmTMB(
-    data = sim_dat, formula = observed ~ 1,
-    mesh = mesh, family = censored_poisson(link = "log"),
-    experimental = list(lwr = lwr, upr = upr),
-    spatial = "off"
-  )
+  # # left-censored version
+  # L_1 <- 5 # zeros and ones cannot be observed directly - observed as <= L1
+  # y <- sim_dat$observed
+  # lwr <- ifelse(y <= L_1, 0, y)
+  # upr <- ifelse(y <= L_1, L_1, y)
+  # m_left_cens_pois <- sdmTMB(
+  #   data = sim_dat, formula = observed ~ 1,
+  #   mesh = mesh, family = censored_poisson(link = "log"),
+  #   control = sdmTMBcontrol(censored_lower = lwr, censored_upper = upr),
+  #   spatial = "off"
+  # )
 
   # right-censored version
   U_1 <- 8 # U_1 and above cannot be directly observed - instead we see >= U1
   y <- sim_dat$observed
   lwr <- ifelse(y >= U_1, U_1, y)
   upr <- ifelse(y >= U_1, NA, y)
+
+  # old:
+  expect_error(m_right_cens_pois <- sdmTMB(
+    data = sim_dat, formula = observed ~ 1,
+    family = censored_poisson(link = "log"),
+    experimental = list(lwr = lwr, upr = upr),
+    spatial = "off"
+  ), regexp = "upr")
+
+  # new:
   m_right_cens_pois <- sdmTMB(
     data = sim_dat, formula = observed ~ 1,
-    mesh = mesh, family = censored_poisson(link = "log"),
-    experimental = list(lwr = lwr, upr = upr),
+    family = censored_poisson(link = "log"),
+    control = sdmTMBcontrol(censored_upper = upr),
     spatial = "off"
   )
 
@@ -262,39 +270,134 @@ test_that("Censored Poisson fits", {
   set.seed(123)
   U_2 <- sample(c(5:9), size = length(y), replace = TRUE)
   L_2 <- sample(c(1, 2, 3, 4), size = length(y), replace = TRUE)
-  lwr <- ifelse(y >= U_2, U_2, ifelse(y <= L_2, 0, y))
+  # lwr <- ifelse(y >= U_2, U_2, ifelse(y <= L_2, 0, y))
   upr <- ifelse(y >= U_2, 500, ifelse(y <= L_2, L_2, y))
   m_interval_cens_pois <- sdmTMB(
     data = sim_dat, formula = observed ~ 1,
-    mesh = mesh, family = censored_poisson(link = "log"),
-    experimental = list(lwr = lwr, upr = upr),
+    family = censored_poisson(link = "log"),
+    control = sdmTMBcontrol(censored_upper = upr),
     spatial = "off"
   )
   expect_true(all(!is.na(summary(m_interval_cens_pois$sd_report)[, "Std. Error"])))
 
-  # reversed upr and lwr:
-  expect_error(
-    m <- sdmTMB(
-      data = sim_dat, formula = observed ~ 1,
-      mesh = mesh, family = censored_poisson(link = "log"),
-      experimental = list(lwr = upr, upr = lwr)
-    ), regexp = "lwr")
+  # # reversed upr and lwr:
+  # expect_error(
+  #   m <- sdmTMB(
+  #     data = sim_dat, formula = observed ~ 1,
+  #     mesh = mesh, family = censored_poisson(link = "log"),
+  #     experimental = list(lwr = upr, upr = lwr)
+  #   ), regexp = "lwr")
 
   # wrong length lwr and upr
   expect_error(
     m <- sdmTMB(
       data = sim_dat, formula = observed ~ 1,
       mesh = mesh, family = censored_poisson(link = "log"),
-      experimental = list(lwr = c(1, 2), upr = c(4, 5, 6))
-    ), regexp = "lwr")
+      control = sdmTMBcontrol(censored_upper = c(4, 5, 6))
+    ), regexp = "upr")
 
   # missing lwr/upr
   expect_error(
     m <- sdmTMB(
       data = sim_dat, formula = observed ~ 1,
       mesh = mesh, family = censored_poisson(link = "log"),
-    ), regexp = "lwr")
+    ), regexp = "censored_upper")
 
+})
+
+test_that("Censored Poisson upper limit function works", {
+  dat <- structure(
+    list(
+      n_catch = c(
+        78L, 63L, 15L, 6L, 7L, 11L, 37L, 99L, 34L, 100L, 77L, 79L,
+        98L, 30L, 49L, 33L, 6L, 28L, 99L, 33L
+      ),
+      prop_removed = c(
+        0.61, 0.81, 0.96, 0.69, 0.99, 0.98, 0.25, 0.95, 0.89, 1, 0.95, 0.95,
+        0.94, 1, 0.95, 1, 0.84, 0.3, 1, 0.99
+      ), n_hooks = c(
+        140L, 140L, 140L, 140L, 140L, 140L, 140L, 140L, 140L, 140L, 140L, 140L,
+        140L, 140L, 140L, 140L, 140L, 140L, 140L, 140L
+      )
+    ),
+    class = "data.frame", row.names = c(NA, -20L)
+  )
+  upr <- get_censored_upper(dat$prop_removed, dat$n_catch, dat$n_hooks, pstar = 0.9)
+ expect_identical(upr,
+   c(78, 63, 28, 6, 39, 34, 37, 109, 34, 140, 87, 89, 105, 70, 59, 73, 6, 28, 139, 65))
+ x <- get_censored_upper(
+     prop_removed = c(0.5, 0.3, 0.2),
+     n_catch = c(3, 3, 3),
+     n_hooks = c(5, 5, 5),
+     pstar = 0.9
+   )
+ expect_equal(x, c(3, 3, 3))
+ expect_error(
+   get_censored_upper(
+     prop_removed = c(0.5, 0.3, 0.2),
+     n_catch = c(3, 3),
+     n_hooks = c(5, 5, 5),
+     pstar = 0.9
+   ),
+   regexp = "length"
+ )
+ expect_error(
+   get_censored_upper(
+     prop_removed = c(0.5, 0.3, 0.2),
+     n_catch = c(3, 3, 3),
+     n_hooks = c(5, 5),
+     pstar = 0.9
+   ),
+   regexp = "length"
+ )
+ expect_error(
+   get_censored_upper(
+     prop_removed = 1.1,
+     n_catch = 1,
+     n_hooks = 1
+   ),
+   regexp = "1"
+ )
+ expect_error(
+   get_censored_upper(
+     prop_removed = -0.1,
+     n_catch = 1,
+     n_hooks = 1
+   ),
+   regexp = "0"
+ )
+ expect_error(
+   get_censored_upper(
+     prop_removed = 0.5,
+     n_catch = -1,
+     n_hooks = 1
+   ),
+   regexp = "0"
+ )
+ expect_error(
+   get_censored_upper(
+     prop_removed = 0.5,
+     n_catch = 0,
+     n_hooks = -1
+   ),
+   regexp = "0"
+ )
+ expect_error(
+   get_censored_upper(
+     prop_removed = 0.5,
+     n_catch = NA_integer_,
+     n_hooks = -1
+   ),
+   regexp = "missing"
+ )
+ expect_error(
+   get_censored_upper(
+     prop_removed = 0.5,
+     n_catch = 1,
+     n_hooks = NA_integer_
+   ),
+   regexp = "missing"
+ )
 })
 
 test_that("Binomial simulation/residuals works with weights argument or cbind()", {
