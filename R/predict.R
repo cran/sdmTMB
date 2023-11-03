@@ -294,6 +294,9 @@ predict.sdmTMB <- function(object, newdata = NULL,
 
   assert_that(model[[1]] %in% c(NA, 1, 2),
     msg = "`model` argument not valid; should be one of NA, 1, 2")
+  if (missing(model)) {
+    if (.has_delta_attr(object)) model <- attr(object, "delta_model_predict") # for ggpredict
+  }
   model <- model[[1]]
   type <- match.arg(type)
   # FIXME parallel setup here?
@@ -379,6 +382,7 @@ predict.sdmTMB <- function(object, newdata = NULL,
       newdata[["_sdmTMB_fake_nd_"]] <- FALSE
       fake_nd[["_sdmTMB_fake_nd_"]] <- TRUE
       newdata <- rbind(newdata, fake_nd)
+      if (!is.null(offset)) offset <- c(offset, rep(0, nrow(fake_nd))) # issue 270
     }
 
     # If making population predictions (with standard errors), we don't need
@@ -422,7 +426,7 @@ predict.sdmTMB <- function(object, newdata = NULL,
       proj_mesh <- object$spde$A_st # fake
       newdata[[xy_cols[1]]] <- NA_real_ # fake
       newdata[[xy_cols[2]]] <- NA_real_ # fake
-      newdata[["sdm_spatial_id"]] <- NA_integer_ # fake
+      newdata[["sdm_spatial_id"]] <- rep(0L, nrow(newdata)) # fake
     }
 
     if (length(object$formula) == 1L) {
@@ -828,6 +832,7 @@ predict.sdmTMB <- function(object, newdata = NULL,
     #   nd[[paste0("zeta_s_", object$spatial_varying[z])]] <- r$zeta_s_A[,z,1]
     # }
     nd$epsilon_st <- r$epsilon_st_A_vec[,1]# DELTA FIXME
+    nd <- nd[!nd[[object$time]] %in% object$extra_time, , drop = FALSE] # issue 270
     obj <- object
   }
 
