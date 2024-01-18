@@ -158,7 +158,8 @@
 #'
 #' # Visualizing a marginal effect ----------------------------------------
 #'
-#' # See the visreg package or the ggeffects::ggeffect() function
+#' # See the visreg package or the ggeffects::ggeffect() or
+#' # ggeffects::ggpredict() functions
 #' # To do this manually:
 #'
 #' nd <- data.frame(depth_scaled =
@@ -179,7 +180,7 @@
 #'  data = d, formula = density ~ 0 + as.factor(year) + s(depth_scaled, k = 5),
 #'  time = "year", mesh = mesh, family = tweedie(link = "log")
 #' )
-#' if (require("visreg", quietly = TRUE)) { # just for help docs
+#' if (require("visreg", quietly = TRUE)) {
 #'   visreg::visreg(m_gam, "depth_scaled")
 #' }
 #'
@@ -312,8 +313,11 @@ predict.sdmTMB <- function(object, newdata = NULL,
   # places where we force newdata:
   nd_arg_was_null <- FALSE
   if (is.null(newdata)) {
-    if (is_delta(object) || nsim > 0 || type == "response" || !is.null(mcmc_samples) || se_fit || !is.null(re_form) || !is.null(re_form_iid)) {
+    if (is_delta(object) || nsim > 0 || type == "response" || !is.null(mcmc_samples) || se_fit || !is.null(re_form) || !is.null(re_form_iid) || !is.null(offset) || isTRUE(object$family$delta)) {
       newdata <- object$data
+      if (!is.null(object$extra_time)) { # issue #273
+        newdata <- newdata[!newdata[[object$time]] %in% object$extra_time,]
+      }
       nd_arg_was_null <- TRUE # will be used to carry over the offset
     }
   }
@@ -341,6 +345,7 @@ predict.sdmTMB <- function(object, newdata = NULL,
   tmb_data <- object$tmb_data
   tmb_data$do_predict <- 1L
   no_spatial <- as.logical(object$tmb_data$no_spatial)
+  fake_nd <- NULL
 
   if (!is.null(newdata)) {
     if (any(!xy_cols %in% names(newdata)) && isFALSE(pop_pred) && !no_spatial)
@@ -367,10 +372,6 @@ predict.sdmTMB <- function(object, newdata = NULL,
       )
 
     if (!identical(new_data_time, original_time) & isFALSE(pop_pred)) {
-      if (isTRUE(return_tmb_object) || nsim > 0) {
-        cli_warn(c("The time elements in `newdata` are not identical to those in the original dataset.",
-          "This is normally fine, but may create problems for index standardization."))
-      }
       missing_time <- original_time[!original_time %in% new_data_time]
       fake_nd_list <- list()
       fake_nd <- newdata[1L,,drop=FALSE]
@@ -457,6 +458,9 @@ predict.sdmTMB <- function(object, newdata = NULL,
 
     if (isFALSE(pop_pred_iid)) {
       for (i in seq_along(RE_names)) {
+        # checking newdata random intercept columns are factors
+        assert_that(is.factor(newdata[[RE_names[i]]]),
+                    msg = sprintf("Random effect group column `%s` in newdata is not a factor.", RE_names[i]))
         levels_fit <- levels(object$data[[RE_names[i]]])
         levels_nd <- levels(newdata[[RE_names[i]]])
         if (sum(!levels_nd %in% levels_fit)) {
@@ -494,7 +498,7 @@ predict.sdmTMB <- function(object, newdata = NULL,
         cli_abort("Prediction offset vector does not equal number of rows in prediction dataset.")
     }
     tmb_data$proj_offset_i <- if (!is.null(offset)) offset else rep(0, nrow(proj_X_ij[[1]]))
-    if (nd_arg_was_null) tmb_data$proj_offset_i <- tmb_data$offset_i
+    # if (nd_arg_was_null) tmb_data$proj_offset_i <- tmb_data$offset_i
     tmb_data$proj_X_threshold <- thresh[[1]]$X_threshold # TODO DELTA HARDCODED TO 1
     tmb_data$area_i <- if (length(area) == 1L) rep(area, nrow(proj_X_ij[[1]])) else area
     tmb_data$proj_mesh <- proj_mesh
@@ -536,7 +540,6 @@ predict.sdmTMB <- function(object, newdata = NULL,
       return(tmb_data)
     }
 
-    # TODO: when fields are a RW, visreg call crashes R here...
     new_tmb_obj <- TMB::MakeADFun(
       data = tmb_data,
       parameters = get_pars(object),
@@ -664,6 +667,9 @@ predict.sdmTMB <- function(object, newdata = NULL,
         }
       }
 
+      if (!is.null(fake_nd)) {
+        out <- out[-seq(nrow(out) - nrow(fake_nd) + 1, nrow(out)), ,drop=FALSE] # issue #273
+      }
       return(out)
     }
 
@@ -809,10 +815,6 @@ predict.sdmTMB <- function(object, newdata = NULL,
         "supply `newdata`. In the meantime you could supply your original data frame ",
         "to the `newdata` argument."))
     }
-    if (isTRUE(object$family$delta)) {
-      cli_abort(c("Delta model prediction not implemented for `newdata = NULL` yet.",
-          "Please provide your data to `newdata` and include the `offset` vector if needed."))
-    }
     nd <- object$data
     lp <- object$tmb_obj$env$last.par.best
     # object$tmb_obj$fn(lp) # call once to update internal structures?
@@ -823,14 +825,10 @@ predict.sdmTMB <- function(object, newdata = NULL,
     # IID and RW effects are baked into fixed effects for `newdata` in above code:
     nd$est_non_rf <- r$eta_fixed_i[,1] + r$eta_rw_i[,1] + r$eta_iid_re_i[,1] # DELTA FIXME
     nd$est_rf <- r$omega_s_A[,1] + r$epsilon_st_A_vec[,1] # DELTA FIXME
-    if (!is.null(object$spatial_varying_formula))
-      cli_abort(c("Prediction with `newdata = NULL` is not supported with spatially varying coefficients yet.",
-          "Please provide your data to `newdata`."))
-    # + r$zeta_s_A
     nd$omega_s <- r$omega_s_A[,1]# DELTA FIXME
-    # for (z in seq_len(dim(r$zeta_s_A)[2])) { # SVC:
-    #   nd[[paste0("zeta_s_", object$spatial_varying[z])]] <- r$zeta_s_A[,z,1]
-    # }
+    for (z in seq_len(dim(r$zeta_s_A)[2])) { # SVC: # DELTA FIXME
+      nd[[paste0("zeta_s_", object$spatial_varying[z])]] <- r$zeta_s_A[,z,1]
+    }
     nd$epsilon_st <- r$epsilon_st_A_vec[,1]# DELTA FIXME
     nd <- nd[!nd[[object$time]] %in% object$extra_time, , drop = FALSE] # issue 270
     obj <- object
@@ -872,7 +870,7 @@ predict.sdmTMB <- function(object, newdata = NULL,
   row.names(nd) <- NULL
 
   if (return_tmb_object) {
-    return(list(data = nd, report = r, obj = obj, fit_obj = object, pred_tmb_data = tmb_data))
+    return(list(data = nd, report = r, obj = obj, fit_obj = object, pred_tmb_data = tmb_data, fake_nd = fake_nd))
   } else {
     if (visreg_df) {
       # for visreg & related, return consistent objects with lm(), gam() etc.

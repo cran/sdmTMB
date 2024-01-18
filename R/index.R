@@ -110,6 +110,11 @@ get_generic <- function(obj, value_name, bias_correct = FALSE, level = 0.95,
       cli_abort(paste0("`obj` needs to be created with ",
         "`predict(..., return_tmb_object = TRUE).`"))
     }
+
+    if (!"report" %in% names(obj$obj)) {
+      cli_abort(c("It looks like the predict function was run without `newdata` specified.",
+        "Re-run the predict function with `newdata` specified.")) #276
+    }
     test <- suppressWarnings(tryCatch(obj$obj$report(obj$obj$env$last.par),
       error = function(e) NA))
     if (all(is.na(test)))
@@ -122,12 +127,14 @@ get_generic <- function(obj, value_name, bias_correct = FALSE, level = 0.95,
     }
 
     # FIXME parallel setup here?
-
-    predicted_time <- sort(unique(obj$data[[obj$fit_obj$time]]))
-    fitted_time <- sort(unique(obj$fit_obj$data[[obj$fit_obj$time]]))
-    if (!all(fitted_time %in% predicted_time)) {
-      cli_abort(paste0("Some of the fitted time elements were not predicted ",
-        "on with `predict.sdmTMB()`. Please include all time elements."))
+    if (!"fake_nd" %in% names(obj)) { # old sdmTMB versions...
+      predicted_time <- sort(unique(obj$data[[obj$fit_obj$time]]))
+      fitted_time <- sort(unique(obj$fit_obj$data[[obj$fit_obj$time]]))
+      if (!all(fitted_time %in% predicted_time)) {
+        cli_abort(paste0("Some of the fitted time elements were not predicted ",
+          "on with `predict.sdmTMB()`. Either supply all time elements to ",
+          "predict() or update sdmTMB and re-fit your object."))
+      }
     }
 
     if (length(area) != nrow(obj$pred_tmb_data$proj_X_ij[[1]]) && length(area) != 1L) {
@@ -223,6 +230,13 @@ get_generic <- function(obj, value_name, bias_correct = FALSE, level = 0.95,
   d[[time_name]] <- sort(unique(obj$fit_obj$data[[time_name]]))
   # d$max_gradient <- max(conv$final_grads)
   # d$bad_eig <- conv$bad_eig
-  d[,c(time_name, 'est', 'lwr', 'upr', 'trans_est', 'se'),
-    drop = FALSE]
+
+  # remove padded extra time fake data:
+  if (!is.null(obj$fake_nd)) {
+    d <- d[!d[[obj$fit_obj$time]] %in% obj$fake_nd[[obj$fit_obj$time]], ,drop = FALSE]
+  }
+  if ("do_index_time_missing_from_nd" %in% names(obj$fit_obj)) {
+    d <- d[!d[[obj$fit_obj$time]] %in% obj$fit_obj$do_index_time_missing_from_nd, ,drop = FALSE]
+  }
+  d[,c(time_name, 'est', 'lwr', 'upr', 'trans_est', 'se'), drop = FALSE]
 }

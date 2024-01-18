@@ -172,14 +172,17 @@ fitting (\code{FALSE})?}
 memory and time when working with large datasets or projection grids since
 the TMB object doesn't have to be rebuilt with \code{\link[=predict.sdmTMB]{predict.sdmTMB()}} and
 \code{\link[=get_index]{get_index()}}. If \code{TRUE}, then \code{predict_args} must have a \code{newdata} element
-supplied and \code{area} can be supplied to \code{index_args}.}
+supplied and \code{area} can be supplied to \code{index_args}.
+Most users can ignore this option. The fitted object can be passed directly
+to \code{\link[=get_index]{get_index()}}.}
 
-\item{predict_args}{A list of arguments to pass to \code{\link[=predict.sdmTMB]{predict.sdmTMB()}} if
-\code{do_index = TRUE}.}
+\item{predict_args}{A list of arguments to pass to \code{\link[=predict.sdmTMB]{predict.sdmTMB()}} \strong{if}
+\code{do_index = TRUE}. Most users can ignore this option.}
 
-\item{index_args}{A list of arguments to pass to \code{\link[=get_index]{get_index()}} if
+\item{index_args}{A list of arguments to pass to \code{\link[=get_index]{get_index()}} \strong{if}
 \code{do_index = TRUE}. Currently, only \code{area} is supported. Bias correction
-can be done when calling \code{\link[=get_index]{get_index()}} on the resulting fitted object.}
+can be done when calling \code{\link[=get_index]{get_index()}} on the resulting fitted object.
+Most users can ignore this option.}
 
 \item{experimental}{A named list for esoteric or in-development options. Here
 be dragons.}
@@ -315,7 +318,7 @@ example of index standardization in the relevant
 You will need to specify the \code{time} argument. See \code{\link[=get_index]{get_index()}}.
 }
 \examples{
-\dontshow{if (require("visreg", quietly = TRUE)) (if (getRversion() >= "3.4") withAutoprint else force)(\{ # examplesIf}
+\dontshow{if (require("visreg", quietly = TRUE) && require("ggeffects", quietly = TRUE)) (if (getRversion() >= "3.4") withAutoprint else force)(\{ # examplesIf}
 library(sdmTMB)
 
 # Build a mesh to implement the SPDE approach:
@@ -355,7 +358,10 @@ p <- predict(fit, newdata = qcs_grid)
 head(p)
 
 \donttest{
-# Visualize depth effect: (see ?visreg_delta)
+# Visualize the depth effect with ggeffects:
+ggeffects::ggpredict(fit,  "depth [all]") |> plot()
+
+# Visualize depth effect with visreg: (see ?visreg_delta)
 visreg::visreg(fit, xvar = "depth") # link space; randomized quantile residuals
 visreg::visreg(fit, xvar = "depth", scale = "response")
 visreg::visreg(fit, xvar = "depth", scale = "response", gg = TRUE, rug = FALSE)

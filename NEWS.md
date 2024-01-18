@@ -1,3 +1,28 @@
+# sdmTMB 0.4.2
+
+* Force rebuild of CRAN binaries to fix issue with breaking Matrix ABI change
+  causing `NaN gradient` errors. #288 #287
+
+* Fix crash in if `sdmTMB(..., do_index = TRUE)` and `extra_time` supplied along
+  with `predict_args = list(newdata = ...)` that lacked `extra_time` elements.
+
+* Allow `get_index()` to work with missing time elements.
+
+* Add the ability to pass a custom randomized quantile function `qres_func`
+  to `residuals.sdmTMB()`.
+
+* Add check for factor random intercept columns in `newdata` to avoid a crash.
+  #278 #280
+
+* Improve warnings/errors around use of `do_index = TRUE` and `get_index()`
+  if `newdata = NULL`. #276
+
+* Fix prediction with `offset` when `newdata` is `NULL` but `offset` is
+  specified. #274
+
+* Fix prediction failure when both `offset` and `nsim` are provided and
+  model includes `extra_time`. #273
+
 # sdmTMB 0.4.1
 
 * Fix memory issues detected by CRAN 'Additional issues' clang-UBSAN, valgrind.

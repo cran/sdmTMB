@@ -124,11 +124,14 @@ NULL
 #'   the TMB object doesn't have to be rebuilt with [predict.sdmTMB()] and
 #'   [get_index()]. If `TRUE`, then `predict_args` must have a `newdata` element
 #'   supplied and `area` can be supplied to `index_args`.
-#' @param predict_args A list of arguments to pass to [predict.sdmTMB()] if
-#'   `do_index = TRUE`.
-#' @param index_args A list of arguments to pass to [get_index()] if
+#'   Most users can ignore this option. The fitted object can be passed directly
+#'   to [get_index()].
+#' @param predict_args A list of arguments to pass to [predict.sdmTMB()] **if**
+#'   `do_index = TRUE`. Most users can ignore this option.
+#' @param index_args A list of arguments to pass to [get_index()] **if**
 #'   `do_index = TRUE`. Currently, only `area` is supported. Bias correction
 #'   can be done when calling [get_index()] on the resulting fitted object.
+#'   Most users can ignore this option.
 #' @param bayesian Logical indicating if the model will be passed to
 #'   \pkg{tmbstan}. If `TRUE`, Jacobian adjustments are applied to account for
 #'   parameter transformations when priors are applied.
@@ -356,7 +359,7 @@ NULL
 #'
 #' @export
 #'
-#' @examplesIf require("visreg", quietly = TRUE)
+#' @examplesIf require("visreg", quietly = TRUE) && require("ggeffects", quietly = TRUE)
 #' library(sdmTMB)
 #'
 #' # Build a mesh to implement the SPDE approach:
@@ -396,7 +399,10 @@ NULL
 #' head(p)
 #'
 #' \donttest{
-#' # Visualize depth effect: (see ?visreg_delta)
+#' # Visualize the depth effect with ggeffects:
+#' ggeffects::ggpredict(fit,  "depth [all]") |> plot()
+#'
+#' # Visualize depth effect with visreg: (see ?visreg_delta)
 #' visreg::visreg(fit, xvar = "depth") # link space; randomized quantile residuals
 #' visreg::visreg(fit, xvar = "depth", scale = "response")
 #' visreg::visreg(fit, xvar = "depth", scale = "response", gg = TRUE, rug = FALSE)
@@ -1384,13 +1390,17 @@ sdmTMB <- function(
     version    = utils::packageVersion("sdmTMB")),
     class      = "sdmTMB")
 
+  if ((!is.null(predict_args) || !is.null(index_args)) && isFALSE(do_index)) {
+    cli_abort(c("`predict_args` and/or `index_args` were set but `do_index` was FALSE.",
+      "`do_index` must be TRUE for these arguments to take effect.")) #276
+  }
   if (do_index) {
     args <- list(object = out_structure, return_tmb_data = TRUE)
     args <- c(args, predict_args)
-    tmb_data <- do.call(predict.sdmTMB, args)
     if (!"newdata" %in% names(predict_args)) {
       cli_warn("`newdata` must be supplied if `do_index = TRUE`.")
     }
+    tmb_data <- do.call(predict.sdmTMB, args)
     if ("bias_correct" %in% names(index_args)) {
       cli_warn("`bias_correct` must be done later with `get_index(..., bias_correct = TRUE)`.")
       index_args$bias_correct <- NULL
@@ -1401,7 +1411,7 @@ sdmTMB <- function(
       index_args[["area"]] <- 1
     }
     if (length(index_args$area) == 1L) {
-      tmb_data$area_i <- rep(index_args[["area"]], nrow(predict_args[["newdata"]]))
+      tmb_data$area_i <- rep(index_args[["area"]], length(tmb_data$proj_year)) # proj_year includes padded extra_time! otherwise, crash
     } else {
       if (length(index_args$area) != nrow(predict_args[["newdata"]]))
         cli_abort("`area` length does not match `nrow(newdata)`.")
@@ -1410,6 +1420,9 @@ sdmTMB <- function(
     tmb_data$calc_index_totals <- 1L
     tmb_params[["eps_index"]] <- numeric(0) # for bias correction
     out_structure$do_index <- TRUE
+    do_index_time_missing_from_nd <-
+    out_structure$do_index_time_missing_from_nd <-
+      setdiff(data[[time]], predict_args$newdata[[time]])
   } else {
     out_structure$do_index <- FALSE
   }
