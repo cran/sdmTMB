@@ -1,7 +1,7 @@
 Type: Package
 Package: sdmTMB
 Title: Spatial and Spatiotemporal SPDE-Based GLMMs with 'TMB'
-Version: 0.4.2
+Version: 0.4.3
 Authors@R: c(
     person(c("Sean", "C."), "Anderson", , "sean@seananderson.ca",
            role = c("aut", "cre"),
@@ -74,10 +74,10 @@ Config/testthat/edition: 3
 Config/testthat/parallel: true
 Encoding: UTF-8
 LazyData: true
-RoxygenNote: 7.2.3
+RoxygenNote: 7.3.1
 SystemRequirements: GNU make
 NeedsCompilation: yes
-Packaged: 2024-01-18 01:20:33 UTC; seananderson
+Packaged: 2024-02-28 21:55:28 UTC; seananderson
 Author: Sean C. Anderson [aut, cre] (<https://orcid.org/0000-0001-9563-1937>),
   Eric J. Ward [aut] (<https://orcid.org/0000-0002-4359-0296>),
   Philina A. English [aut] (<https://orcid.org/0000-0003-2992-6782>),
@@ -111,4 +111,4 @@ Author: Sean C. Anderson [aut, cre] (<https://orcid.org/0000-0001-9563-1937>),
     of the Department of Fisheries and Oceans [cph]
 Maintainer: Sean C. Anderson <sean@seananderson.ca>
 Repository: CRAN
-Date/Publication: 2024-01-18 04:30:02 UTC
+Date/Publication: 2024-02-29 01:40:02 UTC

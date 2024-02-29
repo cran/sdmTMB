@@ -1,3 +1,32 @@
+# sdmTMB 0.4.3
+
+* Fix a bug likely introduced in July 2023 that caused issues when
+  `extra_time` was specified. This is an important bug and models fit with
+  `extra_time` between that date (if using the GitHub version) and v0.4.2.9004
+  (2024-02-24) should be checked against a current version of sdmTMB
+  (v0.4.2.9005 or greater). On CRAN, this affected v0.4.0 (2023-10-20) to 
+  v0.4.2. Details:
+  
+  * The essence of the bug was that `extra_time` works by padding the data
+    with a fake row of data for every extra time element (using the first row of
+    data as the template). This is supposed to then be omitted from the 
+    likelihood so it has no impact on model fitting beyond spacing
+    time-series processes appropriately and setting up internal structures for
+    forecasting. Unfortunately, a bug was introduced that caused these fake data
+    (1 per extra time element) to be included in the likelihood.
+
+* Issue error if `time` column has NAs. #298 #299
+
+* Fix bug in `get_cog(..., format = "wide")` where the time column was
+  hardcoded to `"year"` by accident.
+
+* Poisson-link delta models now use a `type` argument in `delta_gamma()` and
+  `delta_lognormal()`. `delta_poisson_link_gamma()` and
+  `delta_poisson_link_lognormal()` are deprecated. #290
+  
+* Delta families can now pass links that are different from the default 
+  `"logit"` and `"log"`. #290
+
 # sdmTMB 0.4.2
 
 * Force rebuild of CRAN binaries to fix issue with breaking Matrix ABI change
