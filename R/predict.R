@@ -353,6 +353,20 @@ predict.sdmTMB <- function(object, newdata = NULL,
           "Did you miss specifying the argument `xy_cols` to match your data?",
           "The newer `make_mesh()` (vs. `make_spde()`) takes care of this for you."))
 
+    if (isFALSE(pop_pred) && !no_spatial) {
+      xy_orig <- object$data[,xy_cols]
+      xy_nd <- newdata[,xy_cols]
+      all_outside <- function(x1, x2) {
+        min(x1) > max(x2) || max(x1) < min(x2)
+      }
+      if (all_outside(xy_orig[,1], xy_nd[,1]) || all_outside(xy_orig[,2], xy_nd[,2])) {
+        cli_warn(c("`newdata` prediction coordinates appear to be ouside the fitted coordinates.",
+          "This will likely cause all your random field values to be returned as 0.",
+          "Check your coordinates including any conversions between projections.",
+          "If working with UTMs, are both in km or m?"))
+      }
+    }
+
     if (object$time == "_sdmTMB_time") newdata[[object$time]] <- 0L
     if (visreg_df) {
       if (!object$time %in% names(newdata)) {
@@ -361,8 +375,8 @@ predict.sdmTMB <- function(object, newdata = NULL,
     }
 
     check_time_class(object, newdata)
-    original_time <- as.numeric(sort(unique(object$data[[object$time]])))
-    new_data_time <- as.numeric(sort(unique(newdata[[object$time]])))
+    original_time <- as.integer(get_fitted_time(object))
+    new_data_time <- as.integer(sort(unique(newdata[[object$time]])))
 
     if (!all(new_data_time %in% original_time))
       cli_abort(c("Some new time elements were found in `newdata`. ",

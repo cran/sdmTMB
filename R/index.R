@@ -105,6 +105,8 @@ get_cog <- function(obj, bias_correct = FALSE, level = 0.95, format = c("long", 
 get_generic <- function(obj, value_name, bias_correct = FALSE, level = 0.95,
   trans = I, area = 1, silent = TRUE, ...) {
 
+  reinitialize(obj$fit_obj)
+
   if ((!isTRUE(obj$do_index) && value_name[1] == "link_total") || value_name[1] == "cog_x") {
     if (is.null(obj[["obj"]])) {
       cli_abort(paste0("`obj` needs to be created with ",
@@ -129,7 +131,7 @@ get_generic <- function(obj, value_name, bias_correct = FALSE, level = 0.95,
     # FIXME parallel setup here?
     if (!"fake_nd" %in% names(obj)) { # old sdmTMB versions...
       predicted_time <- sort(unique(obj$data[[obj$fit_obj$time]]))
-      fitted_time <- sort(unique(obj$fit_obj$data[[obj$fit_obj$time]]))
+      fitted_time <- get_fitted_time(obj$fit_obj)
       if (!all(fitted_time %in% predicted_time)) {
         cli_abort(paste0("Some of the fitted time elements were not predicted ",
           "on with `predict.sdmTMB()`. Either supply all time elements to ",
@@ -137,6 +139,11 @@ get_generic <- function(obj, value_name, bias_correct = FALSE, level = 0.95,
       }
     }
 
+    assert_that(!is.null(area))
+    if (length(area) > 1L) {
+      n_fakend <- if (!is.null(obj$fake_nd)) nrow(obj$fake_nd) else 0L
+      area <- c(area, rep(1, n_fakend)) # pad area with any extra time
+    }
     if (length(area) != nrow(obj$pred_tmb_data$proj_X_ij[[1]]) && length(area) != 1L) {
       cli_abort("`area` should be of the same length as `nrow(newdata)` or of length 1.")
     }
@@ -183,15 +190,24 @@ get_generic <- function(obj, value_name, bias_correct = FALSE, level = 0.95,
     new_values <- rep(0, length(sr_est$total))
     names(new_values) <- rep(eps_name, length(new_values))
     fixed <- c(obj$fit_obj$model$par, new_values)
+
+    # tictoc::tic("Combined")
+    # tictoc::tic("MakeADFun()")
     new_obj2 <- TMB::MakeADFun(
       data = tmb_data,
       parameters = pars,
       map = obj$fit_obj$tmb_map,
       random = obj$fit_obj$tmb_random,
       DLL = "sdmTMB",
-      silent = silent
+      silent = silent,
+      intern = FALSE, # tested as faster for most models
+      inner.control = list(sparse = TRUE, lowrank = TRUE, trace = TRUE)
     )
+    # tictoc::toc()
+    # tictoc::tic("gr()")
     gradient <- new_obj2$gr(fixed)
+    # tictoc::toc()
+    # tictoc::toc()
     corrected_vals <- gradient[names(fixed) == eps_name]
   } else {
     if (value_name[1] == "link_total")
@@ -227,7 +243,8 @@ get_generic <- function(obj, value_name, bias_correct = FALSE, level = 0.95,
   }
   d$lwr <- as.numeric(trans(d$trans_est + stats::qnorm((1-level)/2) * d$se))
   d$upr <- as.numeric(trans(d$trans_est + stats::qnorm(1-(1-level)/2) * d$se))
-  d[[time_name]] <- sort(unique(obj$fit_obj$data[[time_name]]))
+
+  d[[time_name]] <- get_fitted_time(obj$fit_obj)
   # d$max_gradient <- max(conv$final_grads)
   # d$bad_eig <- conv$bad_eig
 

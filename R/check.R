@@ -37,6 +37,7 @@
 #' all(unlist(s))
 #' all(unlist(s2))
 sanity <- function(object, big_sd_log10 = 2, gradient_thresh = 0.001, silent = FALSE) {
+
   # make it easy to use output from try()
   if (length(object) <= 1L) {
     if (is.na(object) || is.null(object)) {
@@ -47,6 +48,9 @@ sanity <- function(object, big_sd_log10 = 2, gradient_thresh = 0.001, silent = F
     return(FALSE)
   }
   assert_that(inherits(object, "sdmTMB"))
+  if ( isFALSE(object$call$do_fit)) {
+    cli_abort("`do_fit = FALSE` so this model hasn't been fit yet")
+  }
 
   hessian_ok <- eigen_values_ok <- gradients_ok <- se_magnitude_ok <- FALSE
   nlminb_ok <- FALSE
@@ -89,7 +93,7 @@ sanity <- function(object, big_sd_log10 = 2, gradient_thresh = 0.001, silent = F
   g <- object$gradients
   np <- names(object$model$par)
   for (i in seq_along(g)) {
-    if (g[i] > gradient_thresh) {
+    if (abs(g[i]) > gradient_thresh) {
       if (!silent) {
         cli::cli_alert_danger(c(
           "`", np[i],
@@ -104,7 +108,7 @@ sanity <- function(object, big_sd_log10 = 2, gradient_thresh = 0.001, silent = F
     }
   }
 
-  if (all(g <= gradient_thresh)) {
+  if (all(abs(g) <= gradient_thresh)) {
     msg <- "No gradients with respect to fixed effects are >= "
     if (!silent) cli::cli_alert_success(paste0(msg, gradient_thresh))
     gradients_ok <- TRUE
@@ -112,14 +116,19 @@ sanity <- function(object, big_sd_log10 = 2, gradient_thresh = 0.001, silent = F
 
   obj <- object$tmb_obj
   random <- unique(names(obj$env$par[obj$env$random]))
-  s <- summary(object$sd_report)
-  se <- s[, "Std. Error"]
-  fixed_se <- !names(se) %in% random
-  se <- se[fixed_se]
-  np <- names(se)
+
+  pl <- as.list(object$sd_report, "Estimate")
+  ple <- as.list(object$sd_report, "Std. Error")
+  pars <- names(object$model$par)
+  pl <- pl[pars]
+  ple <- ple[pars]
+  np <- names(ple)
+  if (is_delta(object)) {
+    ple$ln_phi[1] <- 0 # don't flag NA, not estimated
+  }
   se_na_ok <- TRUE
-  for (i in seq_along(se)) {
-    if (is.na(se[i])) {
+  for (i in seq_along(ple)) {
+    if (any(is.na(ple[i]))) {
       if (!silent) cli::cli_alert_danger(c("`", np[i], paste0("` standard error is NA")))
       par_message(np[i])
       if (!silent) {

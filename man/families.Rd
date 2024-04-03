@@ -4,6 +4,7 @@
 \alias{Families}
 \alias{Beta}
 \alias{lognormal}
+\alias{gengamma}
 \alias{gamma_mix}
 \alias{lognormal_mix}
 \alias{nbinom2_mix}
@@ -16,6 +17,7 @@
 \alias{censored_poisson}
 \alias{delta_gamma}
 \alias{delta_gamma_mix}
+\alias{delta_gengamma}
 \alias{delta_lognormal}
 \alias{delta_lognormal_mix}
 \alias{delta_truncated_nbinom2}
@@ -28,6 +30,8 @@
 Beta(link = "logit")
 
 lognormal(link = "log")
+
+gengamma(link = "log")
 
 gamma_mix(link = "log")
 
@@ -49,19 +53,13 @@ tweedie(link = "log")
 
 censored_poisson(link = "log")
 
-delta_gamma(
-  link1 = "logit",
-  link2 = "log",
-  type = c("standard", "poisson-link")
-)
+delta_gamma(link1, link2 = "log", type = c("standard", "poisson-link"))
 
 delta_gamma_mix(link1 = "logit", link2 = "log")
 
-delta_lognormal(
-  link1 = "logit",
-  link2 = "log",
-  type = c("standard", "poisson-link")
-)
+delta_gengamma(link1, link2 = "log", type = c("standard", "poisson-link"))
+
+delta_lognormal(link1, link2 = "log", type = c("standard", "poisson-link"))
 
 delta_lognormal_mix(link1 = "logit", link2 = "log")
 
@@ -80,7 +78,8 @@ delta_beta(link1 = "logit", link2 = "logit")
 
 \item{df}{Student-t degrees of freedom fixed value parameter.}
 
-\item{link1}{Link for first part of delta/hurdle model.}
+\item{link1}{Link for first part of delta/hurdle model. Defaults to \code{"logit"}
+for \code{type = "standard"} and \code{"log"} for \code{type = "poisson-link"}.}
 
 \item{link2}{Link for second part of delta/hurdle model.}
 
@@ -99,6 +98,11 @@ Additional families compatible with \code{\link[=sdmTMB]{sdmTMB()}}.
 \code{delta_poisson_link_gamma()} and \code{delta_poisson_link_lognormal()} have been
 deprecated in favour of \code{delta_gamma(type = "poisson-link")} and
 \code{delta_lognormal(type = "poisson-link")}.
+
+The \code{gengamma()} family was implemented by J.T. Thorson and uses the Prentice
+(1974) parameterization such that the lognormal occurs as the internal
+parameter \code{gengamma_Q} (reported in \code{print()} as "Generalized gamma lambda")
+approaches 0.
 
 The families ending in \verb{_mix()} are 2-component mixtures where each
 distribution has its own mean but a shared scale parameter.
@@ -119,6 +123,7 @@ For \code{student()}, the degrees of freedom parameter is currently not estimate
 \examples{
 Beta(link = "logit")
 lognormal(link = "log")
+gengamma(link = "log")
 gamma_mix(link = "log")
 lognormal_mix(link = "log")
 nbinom2_mix(link = "log")
@@ -131,6 +136,7 @@ tweedie(link = "log")
 censored_poisson(link = "log")
 delta_gamma()
 delta_gamma_mix()
+delta_gengamma()
 delta_lognormal()
 delta_lognormal_mix()
 delta_truncated_nbinom2()
@@ -138,6 +144,15 @@ delta_truncated_nbinom1()
 delta_beta()
 }
 \references{
+\emph{Generalized gamma family}:
+
+Prentice, R.L. 1974. A log gamma model and its maximum likelihood estimation.
+Biometrika 61(3): 539–544. \doi{10.1093/biomet/61.3.539}
+
+Stacy, E.W. 1962. A Generalization of the Gamma Distribution. The Annals of
+Mathematical Statistics 33(3): 1187–1192. Institute of Mathematical
+Statistics.
+
 \emph{Families ending in \verb{_mix()}}:
 
 Thorson, J.T., Stewart, I.J., and Punt, A.E. 2011. Accounting for fish shoals

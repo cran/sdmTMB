@@ -166,6 +166,13 @@ make_year_i <- function(x) {
   x - min(x)
 }
 
+make_year_lu <- function(x) {
+  ret <- unique(data.frame(year_i = make_year_i(x), time_from_data = x, stringsAsFactors = FALSE))
+  ret <- ret[order(ret$year_i),,drop=FALSE]
+  row.names(ret) <- NULL
+  ret
+}
+
 check_offset <- function(formula) {
   .check <- any(grepl("^offset$",
     gsub(" ", "", unlist(strsplit(as.character(formula), "\\+")))))
@@ -232,7 +239,9 @@ expand_time <- function(df, time_slices, time_column, weights, offset, upr) {
   df[["__weight_sdmTMB__"]] <- if (!is.null(weights)) weights else  1
   df[["__sdmTMB_offset__"]] <- if (!is.null(offset)) offset else 0
   df[["__dcens_upr__"]] <- if (!is.null(upr)) upr else NA_real_
+  df[["__fake_data__"]] <- FALSE
   fake_df <- df[1L, , drop = FALSE]
+  fake_df[["__fake_data__"]] <- TRUE
   fake_df[["__weight_sdmTMB__"]] <- 0 # IMPORTANT: this turns off these data in the likelihood
   missing_years <- time_slices[!time_slices %in% df[[time_column]]]
   fake_df <- do.call("rbind", replicate(length(missing_years), fake_df, simplify = FALSE))
@@ -582,4 +591,70 @@ set_delta_model <- function(x, model = c(NA, 1, 2)) {
     msg = "`model` argument not valid; should be one of NA, 1, 2")
   attr(x, "delta_model_predict") <- model[[1]]
   x
+}
+
+get_fitted_time <- function(x) {
+  if (!"fitted_time" %in% names(x))
+    cli_abort("Missing 'fitted_time' element in fitted object. Please refit the model with a current version of sdmTMB.")
+  x$fitted_time
+}
+
+update_version <- function(object) {
+  if (object$version < "0.4.3") {
+    cli::cli_abort("`update_version()` only works with models fit with version 0.4.3 or later.")
+  }
+  if (!"fitted_time" %in% names(object)) { # < 0.4.3.9004
+    object$fitted_time <- sort(unique(object$data[[object$time]]))
+
+    et <- object$extra_time
+    o <- object$tmb_obj$env$data$offset_i
+    real_data_n <- length(o) - length(et)
+    o <- o[seq(1, real_data_n)]
+    object$offset <- o
+
+    y <- object$response
+    y <- y[seq(1, real_data_n), , drop = FALSE]
+    object$response <- y
+
+    d <- object$data
+    d[["__fake_data__"]] <- d[["__weight_sdmTMB__"]] <-
+      d[["__sdmTMB_offset__"]] <- d[["__dcens_upr__"]] <- NULL
+    d <- d[seq(1, real_data_n), , drop = FALSE]
+    object$data <- d
+  }
+
+  # add gengamma_Q
+  p <- object$tmb_obj$env$parList()
+  if (!"gengamma_Q" %in% names(p)) {
+    p$gengamma_Q <- 1 # not defined at 0
+    ee <- object$tmb_obj$env
+    map <- object$tmb_map
+    map$gengamma_Q <- factor(NA)
+    object$tmb_obj <- TMB::MakeADFun(
+      data = ee$data,
+      parameters = p,
+      map = map,
+      random = ee$random,
+      silent = ee$silent,
+      DLL = "sdmTMB"
+    )
+    object$tmb_obj$fn(object$model$par)
+    object$tmb_obj$env$last.par.best <- ee$last.par.best
+    object$tmb_map <- map
+  }
+  object
+}
+
+reinitialize <- function(x) {
+  # replacement for TMB:::isNullPointer; modified from glmmTMB source
+  # https://github.com/glmmTMB/glmmTMB/issues/651#issuecomment-912920255
+  # https://github.com/glmmTMB/glmmTMB/issues/651#issuecomment-914542795
+  is_null_pointer <- function(x) {
+    x <- x$tmb_obj$env$ADFun$ptr
+    attributes(x) <- NULL
+    identical(x, new("externalptr"))
+  }
+  if (is_null_pointer(x)) {
+    x$tmb_obj$retape()
+  }
 }

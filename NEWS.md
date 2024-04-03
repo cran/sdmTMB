@@ -1,3 +1,62 @@
+# sdmTMB 0.5.0
+
+* Overhaul residuals vignette ('article') 
+  <https://pbs-assess.github.io/sdmTMB/articles/web_only/residual-checking.html>
+  including brief intros to randomized quantile residuals, simulation-based
+  residuals, 'one-sample' residuals, and uniform vs. Gaussian residuals.
+
+* Add check if prediction coordinates appear outside of fitted coordinates. #285
+
+* Fix memory issue with Tweedie family on large datasets. #302
+
+* Add experimental option to return standard normal residuals from 
+  `dharma_residuals()`.
+
+* Make `simulate.sdmTMB()` not include `extra_time` elements.
+
+* Improved re-initialization of saved fitted model objects in new sessions.
+
+* Fix important bug in `simulate.sdmTMB()` method for delta families where
+  the positive linear predictor was only getting simulated for observations
+  present in the fitted data.
+
+* Add new `"mle-mvn"` type to `residuals.sdmTMB()` and make it the default.
+  This is a fast option for evaluating goodness of fit that should be better
+  than the previous default. See the details section in `?residuals.sdmTMB`
+  for details. The previous default is now called `"mvn-eb"` but is not
+  recommended.
+  
+* Bring `dharma_residuals()` back over from sdmTMBextra to sdmTMB. Add a new
+  option in the `type` argument (`"mle-mvn"`) that should make the
+  simulation residuals consistent with the expected distribution.
+  See the same new documentation in `?residuals.sdmTMB`. The examples
+  in `?dharma_residuals` illustrate suggested use.
+
+* Fix bug in `sanity()` where gradient checks were missing `abs()` such that
+  large negative gradients weren't getting caught. #324
+
+* Return `offset` vector in fitted object as an element. Ensure any extra time
+  rows of data in the `data` element of the fitted object do not include the
+  extra time slices.
+
+* Add experimental residuals option "mle-mvn" where a single approximate 
+  posterior sample of the random effects is drawn and these are combined
+  with the MLE fixed effects to produce residuals. This may become the
+  default option.
+
+* Add the generalized gamma distribution (thanks to J.T. Thorson with additional
+  work by J.C. Dunic.) See `gengamma()`. This distribution is still in a testing
+  phase and is not recommended for applied use yet. #286
+  
+* Detect possible issue with factor(time) in formula if same column name is used
+  for `time` and `extra_time` is specified. #320
+
+* Improve `sanity()` check output when there are NA fixed effect standard
+  errors.
+
+* Set `intern = FALSE` within index bias correction, which seems to be
+  considerably faster when testing with most models.
+
 # sdmTMB 0.4.3
 
 * Fix a bug likely introduced in July 2023 that caused issues when

@@ -1,7 +1,6 @@
 test_that("extra time, newdata, and offsets work", {
   # https://github.com/pbs-assess/sdmTMB/issues/270
   skip_on_cran()
-  skip_on_ci()
   pcod$os <- rep(log(0.01), nrow(pcod)) # offset
   m <- sdmTMB(
     data = pcod,
@@ -36,6 +35,10 @@ test_that("extra time, newdata, and offsets work", {
   expect_equal(ncol(p6), 2L)
   expect_equal(nrow(p6), nrow(pcod))
   expect_equal(p6[, 1, drop = TRUE], p5[, 1, drop = TRUE])
+
+  f <- fitted(m)
+  expect_equal(length(f), 2143L)
+  expect_equal(round(unique(f), 2), c(31.13, 61.93, 64.98, 18.73, 22.76, 42.97, 40.66, 51.65, 26.05))
 })
 
 test_that("extra_time, newdata, get_index() work", {
@@ -114,7 +117,6 @@ test_that("extra time does not affect estimation (without time series estimation
   # there was a bad bug at one point where the likelihood (via the weights)
   # wasn't getting turned off for the extra time data!
   skip_on_cran()
-  skip_on_ci()
   # adding extra time at beginning or end
   m <- sdmTMB(present ~ depth_scaled,
     family = binomial(),
@@ -175,4 +177,58 @@ test_that("extra time does not affect estimation (without time series estimation
     extra_time = 1990
   )
   expect_equal(m$model$par, m1$model$par)
+})
+
+test_that("factor year extra time clash is detected and warned about", {
+  skip_on_cran()
+  mesh <- make_mesh(pcod_2011, c("X", "Y"), cutoff = 20)
+  expect_warning({fit <- sdmTMB(
+    density ~ 0 + as.factor(year),
+    time = "year", extra_time = 2030, do_fit = FALSE,
+    data = pcod_2011, mesh = mesh,
+    family = tweedie(link = "log")
+  )}, regexp = "rename")
+  pcod_2011$year_f <- factor(pcod_2011$year)
+  expect_warning({fit <- sdmTMB(
+    density ~ 0 + year_f,
+    time = "year_f", do_fit = FALSE, extra_time = factor(2030),
+    data = pcod_2011, mesh = mesh,
+    family = tweedie(link = "log")
+  )})
+  pcod_2011$year_f2 <- pcod_2011$year_f
+  fit <- sdmTMB(
+    density ~ 0 + year_f,
+    time = "year_f2", do_fit = FALSE, extra_time = factor(2030),
+    data = pcod_2011, mesh = mesh,
+    family = tweedie(link = "log")
+  )
+})
+
+test_that("update() works on an extra_time model", {
+  skip_on_cran()
+  pcod$os <- rep(log(0.01), nrow(pcod)) # offset check
+  mesh <- make_mesh(pcod, c("X", "Y"), cutoff = 30)
+  m <- sdmTMB(
+    data = pcod,
+    formula = density ~ 0,
+    time_varying = ~ 1,
+    mesh = mesh,
+    offset = pcod$os,
+    family = tweedie(link = "log"),
+    spatial = "on",
+    time = "year",
+    extra_time = c(2012),
+    spatiotemporal = "off"
+  )
+  m2 <- update(m, time_varying_type = "ar1")
+  expect_s3_class(m2, "sdmTMB")
+
+  m2 <- update(m, time_varying_type = "ar1", mesh = m$spde)
+  expect_s3_class(m2, "sdmTMB")
+
+  m2 <- update(m, time_varying_type = "ar1", extra_time = m$extra_time)
+  expect_s3_class(m2, "sdmTMB")
+
+  m2 <- update(m, time_varying_type = "ar1", extra_time = m$extra_time, mesh = m$spde)
+  expect_s3_class(m2, "sdmTMB")
 })

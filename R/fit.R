@@ -27,8 +27,10 @@ NULL
 #'   \code{\link[sdmTMB:families]{censored_poisson()}},
 #'   \code{\link[sdmTMB:families]{gamma_mix()}},
 #'   \code{\link[sdmTMB:families]{lognormal_mix()}},
-#'   \code{\link[sdmTMB:families]{student()}}, and
-#'   \code{\link[sdmTMB:families]{tweedie()}}. Supports the delta/hurdle models:
+#'   \code{\link[sdmTMB:families]{student()}},
+#'   \code{\link[sdmTMB:families]{tweedie()}}, and
+#'   \code{\link[sdmTMB:families]{gengamma()}}.
+#'   Supports the delta/hurdle models:
 #'   \code{\link[sdmTMB:families]{delta_beta()}},
 #'   \code{\link[sdmTMB:families]{delta_gamma()}},
 #'   \code{\link[sdmTMB:families]{delta_gamma_mix()}},
@@ -711,6 +713,13 @@ sdmTMB <- function(
       msg = "Specified `time` column is missing from `data`.")
     assert_that(sum(is.na(as.numeric(data[[time]]))) == 0L,
       msg = "Specified `time` column can't be coerced to a numeric value or contains NAs. Please remove any NAs in the time column.")
+    if (!is.null(extra_time)) { #320 protect against factor(time), extra_time clash
+      if (!is.list(formula)) .form <- list(formula)
+      x <- unlist(lapply(list(formula), \(x) attr(stats::terms(x), "term.labels")))
+      xf <- x[grep("factor\\(", x)]
+      if (any(c(grep(time, xf), grep(paste0("^", time, "$"), x))))
+        cli::cli_warn("Detected potential formula-time column clash. E.g., assuming 'year' is your time column: `formula = ... + factor(year)` combined with `time = 'year'`, and 'extra_time' specified. This can produce a non-identiable model because extra factor levels for the missing time slices will be created. To avoid this, rename your factor time column used in your formula. E.g. create a new column 'year_factor' in your data and use that in the formula. See issue https://github.com/pbs-assess/sdmTMB/issues/320.")
+    }
   }
   if (is.null(time)) {
     time <- "_sdmTMB_time"
@@ -775,6 +784,8 @@ sdmTMB <- function(
     spde$loc_xy <- as.matrix(data[,spde$xy_cols,drop=FALSE])
     spde$A_st <- fmesher::fm_basis(spde$mesh, loc = spde$loc_xy)
     spde$sdm_spatial_id <- seq(1, nrow(data)) # FIXME?
+  } else {
+    data[["__fake_data__"]] <- FALSE
   }
   check_irregalar_time(data, time, spatiotemporal, time_varying)
 
@@ -1144,6 +1155,7 @@ sdmTMB <- function(
     ln_kappa   = matrix(0, 2L, n_m),
     # ln_kappa   = rep(log(sqrt(8) / median(stats::dist(spde$mesh$loc))), 2),
     thetaf     = 0,
+    gengamma_Q = 1, # Not defined at exactly 0
     logit_p_mix = 0,
     log_ratio_mix = 0,
     ln_phi     = rep(0, n_m),
@@ -1175,6 +1187,7 @@ sdmTMB <- function(
   tmb_map$b_j <- NULL
   if (delta) tmb_map$b_j2 <- NULL
   if (family$family[[1]] == "tweedie") tmb_map$thetaf <- NULL
+  if ("gengamma" %in% family$family) tmb_map$gengamma_Q <- NULL
   if (family$family[[1]] %in% c("gamma_mix", "lognormal_mix", "nbinom2_mix")) {
     tmb_map$log_ratio_mix <- NULL
     tmb_map$logit_p_mix <- NULL
@@ -1362,8 +1375,16 @@ sdmTMB <- function(
   prof <- c("b_j")
   if (delta) prof <- c(prof, "b_j2")
 
-  out_structure <- structure(list(
-    data       = data,
+  lu <- make_year_lu(data[[time]])
+  fd <- data[['__fake_data__']]
+  tmp <- data[!fd,,drop=FALSE]
+  # strip fake data from A matrix:
+  if (sum(fd) > 0L) spde <- make_mesh(tmp, spde$xy_cols, mesh = spde$mesh)
+  tmp[['__fake_data__']] <- tmp[['__weight_sdmTMB__']] <-
+    tmp[['__sdmTMB_offset__']] <- tmp[['__dcens_upr__']] <- NULL
+    out_structure <- structure(list(
+    data       = tmp,
+    offset     = offset[!fd],
     spde       = spde,
     formula    = original_formula,
     split_formula = split_formula,
@@ -1372,9 +1393,10 @@ sdmTMB <- function(
     threshold_function = thresh[[1]]$threshold_func,
     epsilon_predictor = epsilon_predictor,
     time       = time,
+    time_lu    = lu,
     family     = family,
     smoothers = sm,
-    response   = y_i,
+    response   = y_i[!fd,,drop=FALSE],
     tmb_data   = tmb_data,
     tmb_params = tmb_params,
     tmb_map    = tmb_map,
@@ -1390,6 +1412,7 @@ sdmTMB <- function(
     contrasts  = lapply(X_ij, attr, which = "contrasts"),
     terms  = lapply(mf, attr, which = "terms"),
     extra_time = extra_time,
+    fitted_time = sort(unique(data[[time]])),
     xlevels    = lapply(seq_along(mf), function(i) stats::.getXlevels(mt[[i]], mf[[i]])),
     call       = match.call(expand.dots = TRUE),
     version    = utils::packageVersion("sdmTMB")),

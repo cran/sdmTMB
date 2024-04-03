@@ -72,6 +72,40 @@ lognormal <- function(link = "log") {
   add_to_family(x)
 }
 
+#' @export
+#' @rdname families
+#' @examples
+#' gengamma(link = "log")
+#' @details
+#' The `gengamma()` family was implemented by J.T. Thorson and uses the Prentice
+#' (1974) parameterization such that the lognormal occurs as the internal
+#' parameter `gengamma_Q` (reported in `print()` as "Generalized gamma lambda")
+#' approaches 0.
+#'
+#' @references
+#'
+#' *Generalized gamma family*:
+#'
+#' Prentice, R.L. 1974. A log gamma model and its maximum likelihood estimation.
+#' Biometrika 61(3): 539–544. \doi{10.1093/biomet/61.3.539}
+#'
+#' Stacy, E.W. 1962. A Generalization of the Gamma Distribution. The Annals of
+#' Mathematical Statistics 33(3): 1187–1192. Institute of Mathematical
+#' Statistics.
+
+gengamma <- function(link = "log") {
+  linktemp <- substitute(link)
+  if (!is.character(linktemp))
+    linktemp <- deparse(linktemp)
+  okLinks <- c("identity", "log", "inverse")
+  if (linktemp %in% okLinks)
+    stats <- stats::make.link(linktemp)
+  else if (is.character(link))
+    stats <- stats::make.link(link)
+  x <- c(list(family = "gengamma", link = linktemp), stats)
+  add_to_family(x)
+}
+
 #' @details The families ending in `_mix()` are 2-component mixtures where each
 #'   distribution has its own mean but a shared scale parameter.
 #'   (Thorson et al. 2011). See the model-description vignette for details.
@@ -280,7 +314,8 @@ censored_poisson <- function(link = "log") {
     linkinv = stats$linkinv), class = "family")
 }
 
-#' @param link1 Link for first part of delta/hurdle model.
+#' @param link1 Link for first part of delta/hurdle model. Defaults to `"logit"`
+#'  for `type = "standard"` and `"log"` for `type = "poisson-link"`.
 #' @param link2 Link for second part of delta/hurdle model.
 #' @param type Delta/hurdle family type. `"standard"` for a classic hurdle
 #'   model. `"poisson-link"` for a Poisson-link delta model (Thorson 2018).
@@ -296,8 +331,10 @@ censored_poisson <- function(link = "log") {
 #' biomass sampling data, and a computationally efficient alternative. Canadian
 #' Journal of Fisheries and Aquatic Sciences, 75(9), 1369-1382.
 #' \doi{10.1139/cjfas-2017-0266}
-delta_gamma <- function(link1 = "logit", link2 = "log", type = c("standard", "poisson-link")) {
+delta_gamma <- function(link1,
+  link2 = "log", type = c("standard", "poisson-link")) {
   type <- match.arg(type)
+  if (missing(link1)) link1 <- if (type == "standard") "logit" else "log"
   l1 <- substitute(link1)
   if (!is.character(l1)) l1 <- deparse(l1)
   l2 <- substitute(link2)
@@ -330,10 +367,38 @@ delta_gamma_mix <- function(link1 = "logit", link2 = "log") {
 
 #' @export
 #' @examples
+#' delta_gengamma()
+#' @rdname families
+delta_gengamma <- function(link1,
+  link2 = "log", type = c("standard", "poisson-link")) {
+  type <- match.arg(type)
+  if (missing(link1)) link1 <- if (type == "standard") "logit" else "log"
+  l1 <- substitute(link1)
+  if (!is.character(l1)) l1 <- deparse(l1)
+  l2 <- substitute(link2)
+  if (!is.character(l2)) l2 <- deparse(l2)
+  f1 <- binomial(link = l1)
+  f2 <- gengamma(link = l2)
+  if (type == "poisson-link") {
+    .type <- "poisson_link_delta"
+    clean_name <- paste0("delta_gengamma(link1 = '", l1, "', link2 = '", l2, "', type = 'poisson-link')")
+  } else {
+    .type <- "standard"
+    clean_name <- paste0("delta_gengamma(link1 = '", l1, "', link2 = '", l2, "')")
+  }
+  structure(list(f1, f2, delta = TRUE, link = c("logit", "log"),
+    type = .type, family = c("binomial", "gengamma"),
+    clean_name = clean_name), class = "family")
+}
+
+#' @export
+#' @examples
 #' delta_lognormal()
 #' @rdname families
-delta_lognormal <- function(link1 = "logit", link2 = "log", type = c("standard", "poisson-link")) {
+delta_lognormal <- function(link1,
+  link2 = "log", type = c("standard", "poisson-link")) {
   type <- match.arg(type)
+  if (missing(link1)) link1 <- if (type == "standard") "logit" else "log"
   l1 <- substitute(link1)
   if (!is.character(l1)) l1 <- deparse(l1)
   l2 <- substitute(link2)
