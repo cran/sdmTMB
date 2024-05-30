@@ -128,17 +128,6 @@ get_generic <- function(obj, value_name, bias_correct = FALSE, level = 0.95,
       obj$fit_obj$control$parallel <- 1L
     }
 
-    # FIXME parallel setup here?
-    if (!"fake_nd" %in% names(obj)) { # old sdmTMB versions...
-      predicted_time <- sort(unique(obj$data[[obj$fit_obj$time]]))
-      fitted_time <- get_fitted_time(obj$fit_obj)
-      if (!all(fitted_time %in% predicted_time)) {
-        cli_abort(paste0("Some of the fitted time elements were not predicted ",
-          "on with `predict.sdmTMB()`. Either supply all time elements to ",
-          "predict() or update sdmTMB and re-fit your object."))
-      }
-    }
-
     assert_that(!is.null(area))
     if (length(area) > 1L) {
       n_fakend <- if (!is.null(obj$fake_nd)) nrow(obj$fake_nd) else 0L
@@ -165,6 +154,7 @@ get_generic <- function(obj, value_name, bias_correct = FALSE, level = 0.95,
     new_obj <- TMB::MakeADFun(
       data = tmb_data,
       parameters = pars,
+      profile = obj$fit_obj$control$profile,
       map = obj$fit_obj$tmb_map,
       random = obj$fit_obj$tmb_random,
       DLL = "sdmTMB",
@@ -191,23 +181,18 @@ get_generic <- function(obj, value_name, bias_correct = FALSE, level = 0.95,
     names(new_values) <- rep(eps_name, length(new_values))
     fixed <- c(obj$fit_obj$model$par, new_values)
 
-    # tictoc::tic("Combined")
-    # tictoc::tic("MakeADFun()")
     new_obj2 <- TMB::MakeADFun(
       data = tmb_data,
       parameters = pars,
       map = obj$fit_obj$tmb_map,
+      profile = obj$fit_obj$control$profile,
       random = obj$fit_obj$tmb_random,
       DLL = "sdmTMB",
       silent = silent,
       intern = FALSE, # tested as faster for most models
       inner.control = list(sparse = TRUE, lowrank = TRUE, trace = TRUE)
     )
-    # tictoc::toc()
-    # tictoc::tic("gr()")
     gradient <- new_obj2$gr(fixed)
-    # tictoc::toc()
-    # tictoc::toc()
     corrected_vals <- gradient[names(fixed) == eps_name]
   } else {
     if (value_name[1] == "link_total")
@@ -244,9 +229,15 @@ get_generic <- function(obj, value_name, bias_correct = FALSE, level = 0.95,
   d$lwr <- as.numeric(trans(d$trans_est + stats::qnorm((1-level)/2) * d$se))
   d$upr <- as.numeric(trans(d$trans_est + stats::qnorm(1-(1-level)/2) * d$se))
 
-  d[[time_name]] <- get_fitted_time(obj$fit_obj)
-  # d$max_gradient <- max(conv$final_grads)
-  # d$bad_eig <- conv$bad_eig
+  if ("pred_tmb_data" %in% names(obj)) { # standard case
+    ii <- sort(unique(obj$pred_tmb_data$proj_year))
+  } else { # fit with do_index = TRUE
+    ii <- sort(unique(obj$fit_obj$tmb_data$proj_year))
+  }
+  d <- d[d$est != 0, ,drop=FALSE] # these were not predicted on
+  lu <- obj$fit_obj$time_lu
+  tt <- lu$time_from_data[match(ii, lu$year_i)]
+  d[[time_name]] <- tt
 
   # remove padded extra time fake data:
   if (!is.null(obj$fake_nd)) {

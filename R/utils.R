@@ -114,6 +114,8 @@ sdmTMBcontrol <- function(
     parallel <- as.integer(parallel)
   }
 
+  assert_that(is.logical(profile) || is.character(profile))
+
   out <- named_list(
     eval.max,
     iter.max,
@@ -166,11 +168,21 @@ make_year_i <- function(x) {
   x - min(x)
 }
 
-make_year_lu <- function(x) {
-  ret <- unique(data.frame(year_i = make_year_i(x), time_from_data = x, stringsAsFactors = FALSE))
-  ret <- ret[order(ret$year_i),,drop=FALSE]
-  row.names(ret) <- NULL
-  ret
+make_time_lu <- function(time_vec_from_data, full_time_vec = sort(unique(time_vec_from_data))) {
+  if (!all(time_vec_from_data %in% full_time_vec)) {
+    stop("All time elements not in full time vector.")
+  }
+  lu <- unique(
+    data.frame(
+      year_i = make_year_i(full_time_vec),
+      time_from_data = full_time_vec,
+      stringsAsFactors = FALSE
+    )
+  )
+  lu$extra_time <- !lu$time_from_data %in% time_vec_from_data
+  lu <- lu[order(lu$time_from_data),]
+  row.names(lu) <- NULL
+  lu
 }
 
 check_offset <- function(formula) {
@@ -599,50 +611,28 @@ get_fitted_time <- function(x) {
   x$fitted_time
 }
 
-update_version <- function(object) {
-  if (object$version < "0.4.3") {
-    cli::cli_abort("`update_version()` only works with models fit with version 0.4.3 or later.")
-  }
-  if (!"fitted_time" %in% names(object)) { # < 0.4.3.9004
-    object$fitted_time <- sort(unique(object$data[[object$time]]))
-
-    et <- object$extra_time
-    o <- object$tmb_obj$env$data$offset_i
-    real_data_n <- length(o) - length(et)
-    o <- o[seq(1, real_data_n)]
-    object$offset <- o
-
-    y <- object$response
-    y <- y[seq(1, real_data_n), , drop = FALSE]
-    object$response <- y
-
-    d <- object$data
-    d[["__fake_data__"]] <- d[["__weight_sdmTMB__"]] <-
-      d[["__sdmTMB_offset__"]] <- d[["__dcens_upr__"]] <- NULL
-    d <- d[seq(1, real_data_n), , drop = FALSE]
-    object$data <- d
-  }
-
-  # add gengamma_Q
-  p <- object$tmb_obj$env$parList()
-  if (!"gengamma_Q" %in% names(p)) {
-    p$gengamma_Q <- 1 # not defined at 0
-    ee <- object$tmb_obj$env
-    map <- object$tmb_map
-    map$gengamma_Q <- factor(NA)
-    object$tmb_obj <- TMB::MakeADFun(
-      data = ee$data,
-      parameters = p,
-      map = map,
-      random = ee$random,
-      silent = ee$silent,
-      DLL = "sdmTMB"
+reload_model <- function(object) {
+  if ("parlist" %in% names(object)) {
+    # tinyVAST does this to be extra sure... I've found one case where it was needed
+    obj <- TMB::MakeADFun(
+      data = object$tmb_data,
+      parameters = object$parlist, #!! important part
+      map = object$tmb_map,
+      random = object$tmb_random,
+      DLL = "sdmTMB",
+      profile = object$control$profile
     )
-    object$tmb_obj$fn(object$model$par)
-    object$tmb_obj$env$last.par.best <- ee$last.par.best
-    object$tmb_map <- map
+    obj$env$beSilent()
+    nll_new <- obj$fn(object$model$par) #!! important: need to eval once (restores last.par.best etc.)
+    if (abs(nll_new - object$model$objective) > 0.01) {
+      cli_abort(c("Model fit is not identical to recorded value:", "
+        something is not working as expected"))
+    }
+    object$tmb_obj <- obj
+    object
+  } else {
+    cli_abort("`reload_model()` only works with models fit with sdmTMB 0.5.0.9006 and higher.")
   }
-  object
 }
 
 reinitialize <- function(x) {
@@ -655,6 +645,20 @@ reinitialize <- function(x) {
     identical(x, new("externalptr"))
   }
   if (is_null_pointer(x)) {
-    x$tmb_obj$retape()
+    x$tmb_obj$env$beSilent()
+    x$tmb_obj$fn(x$model$par)
+    # x$tmb_obj$retape()
+    if ("parlist" %in% names(x) && "last.par.best" %in% names(x)) {
+      if (!identical(x$tmb_obj$env$last.par.best, x$last.par.best)) {
+        cli_warn(c("Detected a potential issue reloading a saved sdmTMB model.",
+          "Please run `fit <- sdmTMB:::reload_model(fit)`,",
+          "where `fit` is your fitted model."))
+      }
+    }
   }
+}
+
+chunk_time <- function(x, chunks) {
+  ny <- length(x)
+  split(x, rep(seq_len(chunks), each = ceiling(ny/chunks))[seq_along(x)])
 }

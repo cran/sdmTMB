@@ -79,8 +79,9 @@ lognormal <- function(link = "log") {
 #' @details
 #' The `gengamma()` family was implemented by J.T. Thorson and uses the Prentice
 #' (1974) parameterization such that the lognormal occurs as the internal
-#' parameter `gengamma_Q` (reported in `print()` as "Generalized gamma lambda")
-#' approaches 0.
+#' parameter `gengamma_Q` (reported in `print()` or `summary()` as
+#' "Generalized gamma Q") approaches 0. If Q matches `phi` the distribution
+#' should be the gamma.
 #'
 #' @references
 #'
@@ -348,7 +349,7 @@ delta_gamma <- function(link1,
     .type <- "standard"
     clean_name <- paste0("delta_gamma(link1 = '", l1, "', link2 = '", l2, "')")
   }
-  structure(list(f1, f2, delta = TRUE, link = c("logit", "log"),
+  structure(list(f1, f2, delta = TRUE, link = c(l1, l2),
     type = .type, family = c("binomial", "Gamma"),
     clean_name = clean_name), class = "family")
 }
@@ -386,7 +387,7 @@ delta_gengamma <- function(link1,
     .type <- "standard"
     clean_name <- paste0("delta_gengamma(link1 = '", l1, "', link2 = '", l2, "')")
   }
-  structure(list(f1, f2, delta = TRUE, link = c("logit", "log"),
+  structure(list(f1, f2, delta = TRUE, link = c(l1, l2),
     type = .type, family = c("binomial", "gengamma"),
     clean_name = clean_name), class = "family")
 }
@@ -412,7 +413,7 @@ delta_lognormal <- function(link1,
     .type <- "standard"
     clean_name <- paste0("delta_lognormal(link1 = '", l1, "', link2 = '", l2, "')")
   }
-  structure(list(f1, f2, delta = TRUE, link = c("logit", "log"),
+  structure(list(f1, f2, delta = TRUE, link = c(l1, l2),
     family = c("binomial", "lognormal"), type = .type,
     clean_name = clean_name), class = "family")
 }
@@ -421,12 +422,25 @@ delta_lognormal <- function(link1,
 #' @examples
 #' delta_lognormal_mix()
 #' @rdname families
-delta_lognormal_mix <- function(link1 = "logit", link2 = "log") {
-  f1 <- binomial(link = link1)
-  f2 <- lognormal(link = link2)
-  structure(list(f1, f2, delta = TRUE, link = c("logit", "log"),
-       family = c("binomial", "lognormal_mix"),
-       clean_name = "delta_lognormal_mix(link1 = 'logit', link2 = 'log')"), class = "family")
+delta_lognormal_mix <- function(link1, link2 = "log", type = c("standard", "poisson-link")) {
+  type <- match.arg(type)
+  if (missing(link1)) link1 <- if (type == "standard") "logit" else "log"
+  l1 <- substitute(link1)
+  if (!is.character(l1)) l1 <- deparse(l1)
+  l2 <- substitute(link2)
+  if (!is.character(l2)) l2 <- deparse(l2)
+  f1 <- binomial(link = l1)
+  f2 <- lognormal(link = l2)
+  if (type == "poisson-link") {
+    .type <- "poisson_link_delta"
+    clean_name <- paste0("delta_lognormal_mix(link1 = '", l1, "', link2 = '", l2, "', type = 'poisson-link')")
+  } else {
+    .type <- "standard"
+    clean_name <- paste0("delta_lognormal_mix(link1 = '", l1, "', link2 = '", l2, "')")
+  }
+  structure(list(f1, f2, delta = TRUE, link = c(l1, l2),
+       family = c("binomial", "lognormal_mix"), type = .type,
+       clean_name = clean_name), class = "family")
 }
 
 #' @export

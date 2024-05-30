@@ -723,10 +723,10 @@ Type objective_function<Type>::operator()()
       eta_i(i,m) += eta_iid_re_i(i,m);
       if (family(m) == binomial_family && !poisson_link_delta) { // regular binomial
         mu_i(i,m) = LogitInverseLink(eta_i(i,m), link(m));
-      } else if (poisson_link_delta) { // a tweak on clogog:
+      } else if (poisson_link_delta) { // a tweak on cloglog:
         // eta_i(i,0) = log numbers density
         // eta_i(i,1) = log average weight
-        // mu_i(i,0) = probability of occurrence (kept in logit space within .cpp)
+        // mu_i(i,0) = probability of occurrence
         // mu_i(i,1) = positive density prediction
         Type log_one_minus_p = -exp(offset_i(i) + eta_i(i,0));
         Type log_p = logspace_sub(Type(0.0), log_one_minus_p);
@@ -736,7 +736,7 @@ Type objective_function<Type>::operator()()
           } else {
             poisson_link_m0_ll(i) = log_one_minus_p; // log(1 - p)
           }
-          mu_i(i,1) = logit(exp(log_p)); // just for recording; not used in ll b/c robustness
+          mu_i(i,0) = exp(log_p); // just for recording; not used in ll b/c robustness
         }
         if (m == 1) mu_i(i,1) = exp(offset_i(i) + eta_i(i,0) + eta_i(i,1) - log_p);
       } else { // all the regular stuff:
@@ -806,13 +806,12 @@ Type objective_function<Type>::operator()()
           }
           case binomial_family: {
             if (poisson_link_delta) {
-              // needed for robustness; must be first model component
-              if (notNA) tmp_ll = poisson_link_m0_ll(i);
+              if (notNA) tmp_ll = poisson_link_m0_ll(i); // needed for robustness; must be first model component
+              SIMULATE{y_i(i,m) = rbinom(size(i), mu_i(i,m));}
             } else {
               if (notNA) tmp_ll = dbinom_robust(y_i(i,m), size(i), mu_i(i,m), true);
+              SIMULATE{y_i(i,m) = rbinom(size(i), invlogit(mu_i(i,m)));} // hardcoded invlogit b/c mu_i in logit space
             }
-            // SIMULATE{y_i(i,m) = rbinom(size(i), InverseLink(mu_i(i,m), link(m)));}
-            SIMULATE{y_i(i,m) = rbinom(size(i), invlogit(mu_i(i,m)));} // hardcoded invlogit b/c mu_i in logit space
             break;
           }
           case poisson_family: {
@@ -860,7 +859,11 @@ Type objective_function<Type>::operator()()
             s1 = log(mu_i(i,m));
             s2 = s1 + ln_phi(m);
             if (notNA) tmp_ll = dnbinom_robust(y_i(i,m), s1, s2, true);
-            SIMULATE {y_i(i,m) = rnbinom2(mu_i(i,m), mu_i(i,m) * (Type(1) + phi(m)));}
+            SIMULATE { // from glmmTMB
+              s1 = mu_i(i,m);
+              s2 = mu_i(i,m) * (Type(1)+phi(m));
+              y_i(i,m) = rnbinom2(s1, s2);
+              }
             break;
           }
           case truncated_nbinom1_family: {
@@ -929,6 +932,10 @@ Type objective_function<Type>::operator()()
           ll_2 = log(p_mix) + dnbinom_robust(y_i(i,m), s1_large, s2_large, true);
           if (notNA) tmp_ll = sdmTMB::log_sum_exp(ll_1, ll_2);
           SIMULATE{
+            s1 = mu_i(i,m);
+            s2 = mu_i(i,m) * (Type(1) + mu_i(i,m) / phi(m));
+            s1_large = mu_i_large(i);
+            s2_large = mu_i_large(i) * (Type(1) + mu_i_large(i) / phi(m));
             if (rbinom(Type(1), p_mix) == 0) {
               y_i(i,m) = rnbinom2(s1, s2);
             } else {
@@ -1080,7 +1087,7 @@ Type objective_function<Type>::operator()()
             if (!exclude_RE(k)) proj_iid_re_i(i,m) += RE(proj_RE_indexes(i, k) + temp,m);
           }
         }
-        proj_fe(i) += proj_iid_re_i(i,m);
+        proj_fe(i,m) += proj_iid_re_i(i,m);
       }
     }
 
@@ -1092,7 +1099,7 @@ Type objective_function<Type>::operator()()
         for (int i = 0; i < proj_X_rw_ik.rows(); i++) {
           for (int k = 0; k < proj_X_rw_ik.cols(); k++) {
             proj_rw_i(i,m) += proj_X_rw_ik(i, k) * b_rw_t(proj_year(i), k, m);
-            proj_fe(i) += proj_rw_i(i,m);
+            proj_fe(i,m) += proj_rw_i(i,m);
           }
         }
       }
@@ -1225,7 +1232,7 @@ Type objective_function<Type>::operator()()
 
     // Total biomass etc.:
     vector<Type> total(n_t);
-    total.setZero();
+    total.setZero(); // important; 0s are filtered out after as not predicted on
     vector<Type> mu_combined(n_p);
     mu_combined.setZero();
 
@@ -1235,8 +1242,8 @@ Type objective_function<Type>::operator()()
       Type t2;
       int link_tmp;
 
-      if (n_m > 1) { // delta model
-        for (int i = 0; i < n_p; i++) {
+      for (int i = 0; i < n_p; i++) {
+        if (n_m > 1) { // delta model
           if (poisson_link_delta) {
             // Type R1 = Type(1.) - exp(-exp(proj_eta(i,0)));
             // Type R2 = exp(proj_eta(i,0)) / R1 * exp(proj_eta(i,1))
@@ -1247,9 +1254,7 @@ Type objective_function<Type>::operator()()
             mu_combined(i) = t1 * t2;
           }
           total(proj_year(i)) += mu_combined(i) * area_i(i);
-        }
-      } else { // non-delta model
-        for (int i = 0; i < n_p; i++) {
+        } else { // non-delta model
           mu_combined(i) = InverseLink(proj_eta(i,0), link(0));
           total(proj_year(i)) += mu_combined(i) * area_i(i);
         }
