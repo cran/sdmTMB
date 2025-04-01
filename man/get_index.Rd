@@ -2,8 +2,11 @@
 % Please edit documentation in R/index.R
 \name{get_index}
 \alias{get_index}
+\alias{get_index_split}
 \alias{get_cog}
-\title{Extract a relative biomass/abundance index or a center of gravity}
+\alias{get_eao}
+\title{Extract a relative biomass/abundance index, center of gravity, or effective
+area occupied}
 \usage{
 get_index(
   obj,
@@ -11,6 +14,18 @@ get_index(
   level = 0.95,
   area = 1,
   silent = TRUE,
+  ...
+)
+
+get_index_split(
+  obj,
+  newdata,
+  bias_correct = FALSE,
+  nsplit = 1,
+  level = 0.95,
+  area = 1,
+  silent = FALSE,
+  predict_args = list(),
   ...
 )
 
@@ -23,21 +38,38 @@ get_cog(
   silent = TRUE,
   ...
 )
+
+get_eao(obj, bias_correct = FALSE, level = 0.95, area = 1, silent = TRUE, ...)
 }
 \arguments{
-\item{obj}{Output from \code{\link[=predict.sdmTMB]{predict.sdmTMB()}} with \code{return_tmb_object = TRUE}.}
+\item{obj}{Output from \code{\link[=predict.sdmTMB]{predict.sdmTMB()}} with \code{return_tmb_object = TRUE}.
+Alternatively, if \code{\link[=sdmTMB]{sdmTMB()}} was called with \code{do_index = TRUE} or if using
+the helper function \code{\link[=get_index_split]{get_index_split()}}, an object from \code{\link[=sdmTMB]{sdmTMB()}}.}
 
 \item{bias_correct}{Should bias correction be implemented \code{\link[TMB:sdreport]{TMB::sdreport()}}?}
 
 \item{level}{The confidence level.}
 
 \item{area}{Grid cell area. A vector of length \code{newdata} from
-\code{\link[=predict.sdmTMB]{predict.sdmTMB()}} or a value of length 1, which will be repeated
-internally to match.}
+\code{\link[=predict.sdmTMB]{predict.sdmTMB()}} \emph{or} a value of length 1 which will be repeated
+internally to match \emph{or} a character value representing the column
+used for area weighting.}
 
 \item{silent}{Silent?}
 
 \item{...}{Passed to \code{\link[TMB:sdreport]{TMB::sdreport()}}.}
+
+\item{newdata}{New data (e.g., a prediction grid by year) to pass to
+\code{\link[=predict.sdmTMB]{predict.sdmTMB()}} in the case of \code{get_index_split()}.}
+
+\item{nsplit}{The number of splits to do the calculation in. For memory
+intensive operations (large grids and/or models), it can be helpful to
+do the prediction, area integration, and bias correction on subsets of
+time slices (e.g., years) instead of all at once. If \code{nsplit > 1}, this
+will usually be slower but with reduced memory use.}
+
+\item{predict_args}{A list of arguments to pass to \code{\link[=predict.sdmTMB]{predict.sdmTMB()}} in the
+case of \code{get_index_split()}.}
 
 \item{format}{Long or wide.}
 }
@@ -50,39 +82,70 @@ For \code{get_cog()}:
 A data frame with a columns for time, estimate (center of gravity in x and y
 coordinates), lower and upper confidence intervals, and standard error of
 center of gravity coordinates.
+
+For \code{get_eao()}:
+A data frame with a columns for time, estimate (effective area occupied; EAO),
+lower and upper confidence intervals,
+log EAO, and standard error of the log EAO estimates.
 }
 \description{
-Extract a relative biomass/abundance index or a center of gravity
+Extract a relative biomass/abundance index, center of gravity, or effective
+area occupied
 }
 \examples{
+\dontshow{if (ggplot2_installed()) (if (getRversion() >= "3.4") withAutoprint else force)(\{ # examplesIf}
 \donttest{
-# Use a small number of knots for this example to make it fast:
-pcod_spde <- make_mesh(pcod, c("X", "Y"), n_knots = 60, type = "kmeans")
+library(ggplot2)
+
+# use a small number of knots for this example to make it fast:
+mesh <- make_mesh(pcod, c("X", "Y"), n_knots = 60)
+
+# fit a spatiotemporal model:
 m <- sdmTMB(
  data = pcod,
  formula = density ~ 0 + as.factor(year),
- time = "year", mesh = pcod_spde, family = tweedie(link = "log")
+ time = "year", mesh = mesh, family = tweedie(link = "log")
 )
 
-# make prediction grid:
+# prepare a prediction grid:
 nd <- replicate_df(qcs_grid, "year", unique(pcod$year))
 
 # Note `return_tmb_object = TRUE` and the prediction grid:
 predictions <- predict(m, newdata = nd, return_tmb_object = TRUE)
-ind <- get_index(predictions)
 
-if (require("ggplot2", quietly = TRUE)) {
+# biomass index:
+ind <- get_index(predictions, bias_correct = TRUE)
+ind
 ggplot(ind, aes(year, est)) + geom_line() +
-  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.4)
-}
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.4) +
+  ylim(0, NA)
 
-cog <- get_cog(predictions)
+# do that in 2 chunks
+# only necessary for very large grids to save memory
+# will be slower but save memory
+# note the first argument is the model fit object:
+ind <- get_index_split(m, newdata = nd, nsplit = 2, bias_correct = TRUE)
+
+# center of gravity:
+cog <- get_cog(predictions, format = "wide")
 cog
-}
+ggplot(cog, aes(est_x, est_y, colour = year)) +
+  geom_point() +
+  geom_linerange(aes(xmin = lwr_x, xmax = upr_x)) +
+  geom_linerange(aes(ymin = lwr_y, ymax = upr_y)) +
+  scale_colour_viridis_c()
 
+# effective area occupied:
+eao <- get_eao(predictions)
+eao
+ggplot(eao, aes(year, est)) + geom_line() +
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha = 0.4) +
+  ylim(0, NA)
+}
+\dontshow{\}) # examplesIf}
 }
 \references{
-Geostatistical random-field model-based indices of abundance
+Geostatistical model-based indices of abundance
 (along with many newer papers):
 
 Shelton, A.O., Thorson, J.T., Ward, E.J., and Feist, B.E. 2014. Spatial
@@ -100,6 +163,14 @@ Geostatistical model-based centre of gravity:
 Thorson, J.T., Pinsky, M.L., and Ward, E.J. 2016. Model-based inference for
 estimating shifts in species distribution, area occupied and centre of
 gravity. Methods Ecol Evol 7(8): 990–1002. \doi{10.1111/2041-210X.12567}
+
+Geostatistical model-based effective area occupied:
+
+Thorson, J.T., Rindorf, A., Gao, J., Hanselman, D.H., and Winker, H. 2016.
+Density-dependent changes in effective area occupied for
+sea-bottom-associated marine fishes. Proceedings of the Royal Society B:
+Biological Sciences 283(1840): 20161853.
+\doi{10.1098/rspb.2016.1853}
 
 Bias correction:
 

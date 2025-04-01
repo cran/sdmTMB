@@ -48,8 +48,9 @@ overflow: visible;
 }
 </style>
 <style type="text/css" data-origin="pandoc">
+html { -webkit-text-size-adjust: 100%; }
 pre > code.sourceCode { white-space: pre; position: relative; }
-pre > code.sourceCode > span { line-height: 1.25; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
 pre > code.sourceCode > span:empty { height: 1.2em; }
 .sourceCode { overflow: visible; }
 code.sourceCode > span { color: inherit; text-decoration: inherit; }
@@ -60,7 +61,7 @@ div.sourceCode { overflow: auto; }
 }
 @media print {
 pre > code.sourceCode { white-space: pre-wrap; }
-pre > code.sourceCode > span { display: inline-block; text-indent: -5em; padding-left: 5em; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
 }
 pre.numberSource code
 { counter-reset: source-line 0; }
@@ -400,7 +401,7 @@ mixture</a></li>
 </ul></li>
 <li><a href="#gaussian-random-fields" id="toc-gaussian-random-fields">Gaussian random fields</a>
 <ul>
-<li><a href="#matérn-parameterization" id="toc-matérn-parameterization">Matérn parameterization</a></li>
+<li><a href="#mat%C3%A9rn-parameterization" id="toc-matérn-parameterization">Matérn parameterization</a></li>
 <li><a href="#projection-boldsymbola-matrix" id="toc-projection-boldsymbola-matrix">Projection <span class="math inline">\(\boldsymbol{A}\)</span> matrix</a></li>
 <li><a href="#anisotropy" id="toc-anisotropy">Anisotropy</a></li>
 <li><a href="#incorporating-physical-barriers-into-the-spde" id="toc-incorporating-physical-barriers-into-the-spde">Incorporating
@@ -913,8 +914,8 @@ are IID. They are defined as</p>
 \boldsymbol{\delta}_{t=1} &amp;\sim \operatorname{MVNormal}
 (\boldsymbol{0}, \boldsymbol{\Sigma}_{\epsilon}),\\
 \boldsymbol{\delta}_{t&gt;1} &amp;= \boldsymbol{\delta}_{t-1}
-+  \boldsymbol{\epsilon_{t-1}},  \:
-\boldsymbol{\epsilon_{t-1}} \sim \operatorname{MVNormal}
++  \boldsymbol{\epsilon_{t}},  \:
+\boldsymbol{\epsilon_{t}} \sim \operatorname{MVNormal}
 \left(\boldsymbol{0}, \boldsymbol{\Sigma}_{\epsilon} \right),
 \end{aligned}
 \]</span></p>

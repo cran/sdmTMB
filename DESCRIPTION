@@ -1,7 +1,7 @@
 Type: Package
 Package: sdmTMB
 Title: Spatial and Spatiotemporal SPDE-Based GLMMs with 'TMB'
-Version: 0.6.0
+Version: 0.7.0
 Authors@R: c(
     person(c("Sean", "C."), "Anderson", , "sean@seananderson.ca",
            role = c("aut", "cre"),
@@ -60,14 +60,14 @@ Copyright: inst/COPYRIGHTS
 URL: https://pbs-assess.github.io/sdmTMB/,
         https://github.com/pbs-assess/sdmTMB
 BugReports: https://github.com/pbs-assess/sdmTMB/issues
-Depends: R (>= 3.5.0)
-Imports: assertthat, clisymbols, cli, fmesher, fishMod, generics,
-        graphics, lifecycle, lme4, Matrix, methods, mgcv, mvtnorm,
-        nlme, rlang, stats, TMB (>= 1.8.0)
+Depends: R (>= 4.1.0)
+Imports: assertthat, abind, cli, fmesher, fishMod, generics, graphics,
+        lifecycle, lme4, Matrix, methods, mgcv, mvtnorm, nlme, rlang,
+        stats, TMB (>= 1.8.0)
 Suggests: DHARMa, dplyr, effects (>= 4.0-1), estimability, emmeans (>=
         1.4), future, future.apply, ggeffects, ggforce, glmmTMB,
-        ggplot2, knitr, rmarkdown, sf, splancs, testthat, tibble,
-        visreg
+        ggplot2, knitr, rmarkdown, sf, spatstat.data, splancs,
+        testthat, tibble, visreg
 LinkingTo: RcppEigen, TMB
 VignetteBuilder: knitr
 ByteCompile: true
@@ -75,10 +75,10 @@ Config/testthat/edition: 3
 Config/testthat/parallel: true
 Encoding: UTF-8
 LazyData: true
-RoxygenNote: 7.3.1
+RoxygenNote: 7.3.2
 SystemRequirements: GNU make
 NeedsCompilation: yes
-Packaged: 2024-05-29 03:17:14 UTC; seananderson
+Packaged: 2025-04-01 20:44:09 UTC; seananderson
 Author: Sean C. Anderson [aut, cre] (<https://orcid.org/0000-0001-9563-1937>),
   Eric J. Ward [aut] (<https://orcid.org/0000-0002-4359-0296>),
   Philina A. English [aut] (<https://orcid.org/0000-0003-2992-6782>),
@@ -112,4 +112,4 @@ Author: Sean C. Anderson [aut, cre] (<https://orcid.org/0000-0001-9563-1937>),
     of the Department of Fisheries and Oceans [cph]
 Maintainer: Sean C. Anderson <sean@seananderson.ca>
 Repository: CRAN
-Date/Publication: 2024-05-30 00:00:02 UTC
+Date/Publication: 2025-04-01 21:30:06 UTC
