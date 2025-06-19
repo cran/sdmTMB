@@ -1,7 +1,7 @@
 Type: Package
 Package: sdmTMB
 Title: Spatial and Spatiotemporal SPDE-Based GLMMs with 'TMB'
-Version: 0.7.0
+Version: 0.7.2
 Authors@R: c(
     person(c("Sean", "C."), "Anderson", , "sean@seananderson.ca",
            role = c("aut", "cre"),
@@ -78,31 +78,34 @@ LazyData: true
 RoxygenNote: 7.3.2
 SystemRequirements: GNU make
 NeedsCompilation: yes
-Packaged: 2025-04-01 20:44:09 UTC; seananderson
-Author: Sean C. Anderson [aut, cre] (<https://orcid.org/0000-0001-9563-1937>),
-  Eric J. Ward [aut] (<https://orcid.org/0000-0002-4359-0296>),
-  Philina A. English [aut] (<https://orcid.org/0000-0003-2992-6782>),
-  Lewis A. K. Barnett [aut] (<https://orcid.org/0000-0002-9381-8375>),
-  James T. Thorson [aut, cph] (<https://orcid.org/0000-0001-7415-1010>,
-    VAST author),
+Packaged: 2025-06-19 20:26:24 UTC; seananderson
+Author: Sean C. Anderson [aut, cre] (ORCID:
+    <https://orcid.org/0000-0001-9563-1937>),
+  Eric J. Ward [aut] (ORCID: <https://orcid.org/0000-0002-4359-0296>),
+  Philina A. English [aut] (ORCID:
+    <https://orcid.org/0000-0003-2992-6782>),
+  Lewis A. K. Barnett [aut] (ORCID:
+    <https://orcid.org/0000-0002-9381-8375>),
+  James T. Thorson [aut, cph] (ORCID:
+    <https://orcid.org/0000-0001-7415-1010>, VAST author),
   Joe Watson [ctb] (Censored Poisson),
   Julia Indivero [ctb] (Vignette writing),
-  Jillian C. Dunic [ctb] (<https://orcid.org/0000-0002-0729-3083>),
-  Cole C. Monnahan [ctb, cph] (<https://orcid.org/0000-0003-0871-6700>,
-    VAST contributor),
-  Mollie Brooks [ctb, cph] (<https://orcid.org/0000-0001-6963-8326>,
+  Jillian C. Dunic [ctb] (ORCID: <https://orcid.org/0000-0002-0729-3083>),
+  Cole C. Monnahan [ctb, cph] (ORCID:
+    <https://orcid.org/0000-0003-0871-6700>, VAST contributor),
+  Mollie Brooks [ctb, cph] (ORCID:
+    <https://orcid.org/0000-0001-6963-8326>, glmmTMB author),
+  Ben Bolker [ctb, cph] (ORCID: <https://orcid.org/0000-0002-2127-0443>,
     glmmTMB author),
-  Ben Bolker [ctb, cph] (<https://orcid.org/0000-0002-2127-0443>, glmmTMB
-    author),
   Kasper Kristensen [ctb, cph] (TMB/glmmTMB author),
-  Martin Maechler [ctb, cph] (<https://orcid.org/0000-0002-8685-9910>,
-    glmmTMB author),
-  Arni Magnusson [ctb, cph] (<https://orcid.org/0000-0003-2769-6741>,
-    glmmTMB author),
+  Martin Maechler [ctb, cph] (ORCID:
+    <https://orcid.org/0000-0002-8685-9910>, glmmTMB author),
+  Arni Magnusson [ctb, cph] (ORCID:
+    <https://orcid.org/0000-0003-2769-6741>, glmmTMB author),
   Hans J. Skaug [ctb, cph] (glmmTMB author, SPDE barrier),
-  Anders Nielsen [ctb, cph] (<https://orcid.org/0000-0001-9683-9262>,
-    glmmTMB author),
-  Casper Berg [ctb, cph] (<https://orcid.org/0000-0002-3812-5269>,
+  Anders Nielsen [ctb, cph] (ORCID:
+    <https://orcid.org/0000-0001-9683-9262>, glmmTMB author),
+  Casper Berg [ctb, cph] (ORCID: <https://orcid.org/0000-0002-3812-5269>,
     glmmTMB author),
   Koen van Bentham [ctb, cph] (glmmTMB author),
   Olav Nikolai Breivik [ctb, cph] (SPDE barrier),
@@ -112,4 +115,4 @@ Author: Sean C. Anderson [aut, cre] (<https://orcid.org/0000-0001-9563-1937>),
     of the Department of Fisheries and Oceans [cph]
 Maintainer: Sean C. Anderson <sean@seananderson.ca>
 Repository: CRAN
-Date/Publication: 2025-04-01 21:30:06 UTC
+Date/Publication: 2025-06-19 21:20:02 UTC

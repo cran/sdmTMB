@@ -1,3 +1,43 @@
+# sdmTMB 0.7.2
+
+## New features
+
+* Add deviance residuals (`residuals(fit, type = "deviance")`) and
+  `deviance.sdmTMB()` method (`deviance(fit)`). Proportion deviance explained
+  can be calculated as `1 - deviance(fit) / deviance(fit_null)` where 
+  `fit_null` is a null model, e.g., fit with `formula = ~ 1` and turning 
+  off any random fields as desired
+  (e.g., `spatial = "off", spatiotemporal = "off"`).
+
+* Add `observation_error` argument to `simulate.sdmTMB()` to allow
+  turning off observation error simulation. The intended use-case
+  is for simulating from random effects but not adding observation
+  error. #431
+
+## Minor improvements and fixes
+
+* Change the default in `dharma_residuals()` to
+  `test_uniformity = FALSE`. Based on simulation testing, we
+  generally do not recommend using these p-values to reject models.
+
+* Fix a bug introduced in version 0.7.0 where printing of the 2nd
+  linear predictor smoother fixed effects (`bs`) was accidentally a copy
+  of the 1st linear predictor smoother fixed effects.
+
+* Fix bug in simulation with time-varying AR(1) when using the 
+  `project()` function. Thanks to A. Allyn for pointing out the bug.
+
+* Fix reporting of converged models with `sdmTMB_cv()`. A recent change
+  resulted in reporting only 1 model converged if all models converged.
+
+* Remove warning about old default residuals type.
+
+* Fix `project()` and `simulate.sdmTMB(..., newdata = ...)` when 
+  random intercepts/slopes are present. #431
+  
+* Remove extra TMB data slots for `project()` and
+  `simulate.sdmTMB(..., newdata = ...)` to save memory. #431
+
 # sdmTMB 0.7.0
 
 ## New features
