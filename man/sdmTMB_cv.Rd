@@ -18,7 +18,6 @@ sdmTMB_cv(
   parallel = TRUE,
   use_initial_fit = FALSE,
   future_globals = NULL,
-  spde = deprecated(),
   ...
 )
 }
@@ -64,8 +63,6 @@ arguments if an error is returned that \pkg{future.apply} can't find an
 object. This vector is appended to \code{TRUE} and passed to the argument
 \code{future.globals} in \code{\link[future.apply:future_lapply]{future.apply::future_lapply()}}. Useful if global
 objects are used to specify arguments like priors, families, etc.}
-
-\item{spde}{\strong{Depreciated.} Use \code{mesh} instead.}
 
 \item{...}{All other arguments required to run \code{\link[=sdmTMB]{sdmTMB()}} model with the
 exception of \code{weights}, which are used to define the folds.}
@@ -125,6 +122,11 @@ An example of LFOCV with 9 time steps, \code{lfo_forecast = 2}, and
 \item Fit data to time steps 1 to 7, predict and validate step 9.
 }
 
+Note these are time steps as they are presented in order in the data.
+For example, in the \code{pcod} data example below steps between data points
+are not always one year but an \code{lfo_forecast = 2} forecasts 2 time
+steps as presented not two years.
+
 See example below.
 }
 \examples{
@@ -146,6 +148,7 @@ head(m_cv$data)
 m_cv$models[[1]]
 m_cv$max_gradients
 
+
 \donttest{
 # Create mesh each fold:
 m_cv2 <- sdmTMB_cv(
@@ -161,5 +164,23 @@ m_cv3 <- sdmTMB_cv(
   family = tweedie(link = "log"),
   fold_ids = rep(seq(1, 3), nrow(pcod))[seq(1, nrow(pcod))]
 )
+
+# LFOCV:
+m_lfocv <- sdmTMB_cv(
+  present ~ s(year, k = 4),
+  data = pcod,
+  lfo = TRUE,
+  lfo_forecast = 2,
+  lfo_validations = 3,
+  family = binomial(),
+  mesh = mesh,
+  spatial = "off", # fast example
+  spatiotemporal = "off", # fast example
+  time = "year" # must be specified
+)
+
+# See how the LFOCV folds were assigned:
+fold_table <- table(m_lfocv$data$cv_fold, m_lfocv$data$year)
+fold_table
 }
 }

@@ -168,7 +168,7 @@ NULL
 #' * `gradients`: marginal log likelihood gradients with respect to each fixed effect
 #' * `model`: output from [stats::nlminb()]
 #' * `data`: the fitted data
-#' * `mesh`: the object that was supplied to the `mesh` argument
+#' * `spde`: the object that was supplied to the `mesh` argument
 #' * `family`: the family object, which includes the inverse link function as `family$linkinv()`
 #' * `tmb_params`: The parameters list passed to [TMB::MakeADFun()]
 #' * `tmb_map`: The 'map' list passed to [TMB::MakeADFun()]
@@ -692,11 +692,13 @@ sdmTMB <- function(
   upper <- control$upper
   get_joint_precision <- control$get_joint_precision
   upr <- control$censored_upper
+  suppress_nlminb_warnings <- control$suppress_nlminb_warnings
 
   dot_checks <- c(
     "lower", "upper", "profile", "parallel", "censored_upper",
     "nlminb_loops", "newton_steps", "mgcv", "quadratic_roots", "multiphase",
-    "newton_loops", "start", "map", "get_joint_precision", "normalize"
+    "newton_loops", "start", "map", "get_joint_precision", "normalize",
+    "suppress_nlminb_warnings"
   )
   .control <- control
   # FIXME; automate this from sdmTMcontrol args?
@@ -1584,14 +1586,20 @@ sdmTMB <- function(
     tmb_opt <- list(par = tmb_obj$par, objective = tmb_obj$fn(tmb_obj$par))
   }
 
+  if (isTRUE(suppress_nlminb_warnings)) {
+    maybe_suppress_warnings <- suppressWarnings
+  } else {
+    maybe_suppress_warnings <- I
+  }
+
   if (nlminb_loops > 1) {
     if (!silent) cli_inform("running extra nlminb optimization\n")
     for (i in seq(2, nlminb_loops, length = max(0, nlminb_loops - 1))) {
       temp <- tmb_opt[c("iterations", "evaluations")]
-      tmb_opt <- stats::nlminb(
+      tmb_opt <- maybe_suppress_warnings(stats::nlminb(
         start = tmb_opt$par, objective = tmb_obj$fn, gradient = tmb_obj$gr,
         control = .control, lower = lim$lower, upper = lim$upper
-      )
+      ))
       tmb_opt[["iterations"]] <- tmb_opt[["iterations"]] + temp[["iterations"]]
       tmb_opt[["evaluations"]] <- tmb_opt[["evaluations"]] + temp[["evaluations"]]
     }
@@ -1601,15 +1609,8 @@ sdmTMB <- function(
       cli_inform("Upper or lower limits were set. `stats::optimHess()` will ignore these limits. Set `control = sdmTMBcontrol(newton_loops = 0)` to avoid the `stats::optimHess()` optimization if desired.")
     }
   }
-  if (newton_loops > 0) {
-    if (!silent) cli_inform("attempting to improve convergence with optimHess\n")
-    for (i in seq_len(newton_loops)) {
-      g <- as.numeric(tmb_obj$gr(tmb_opt$par))
-      h <- stats::optimHess(tmb_opt$par, fn = tmb_obj$fn, gr = tmb_obj$gr)
-      tmb_opt$par <- tmb_opt$par - solve(h, g)
-      tmb_opt$objective <- tmb_obj$fn(tmb_opt$par)
-    }
-  }
+
+  tmb_opt <- run_newton_loops(newton_loops = newton_loops, tmb_opt, tmb_obj, silent)
   check_bounds(tmb_opt$par, lim$lower, lim$upper)
 
   if (!silent) cli_inform("running TMB sdreport\n")

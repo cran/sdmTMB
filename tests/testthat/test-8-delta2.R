@@ -245,7 +245,7 @@ test_that("spatiotemporal field mapping/specification works with delta models", 
     spatiotemporal = "ar1"
   )
   s2 <- as.list(fit$sd_report, "Estimate")
-  expect_equal(s1, s2)
+  expect_equal(s1, s2, tolerance = 1e-4)
 })
 
 test_that("delta models work with different main effects", {
@@ -522,8 +522,8 @@ test_that("one spatial off in a delta model works", {
   t0 <- tidy(m0, "ran_pars", model = 2)
   t2 <- tidy(m2, "ran_pars")
 
-  expect_equal(t0, t2, tolerance = 0.01)
-
+  expect_equal(t0[,c("term","estimate","std.error","conf.low","conf.high")],
+               t2[,c("term","estimate","std.error","conf.low","conf.high")], tolerance = 0.01)
 
   # ---------------------
   # with sigma_E

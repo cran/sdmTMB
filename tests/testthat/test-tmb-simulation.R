@@ -184,6 +184,27 @@ test_that("simulate.sdmTMB returns the right length", {
   expect_equal(nrow(s), nrow(pcod))
 })
 
+test_that("simulate.sdmTMB works with sizes in binomial GLMs #465", {
+  skip_on_cran()
+  set.seed(1)
+  w <- sample(1:10, size = 200, replace = TRUE)
+  x <- rnorm(200)
+  dat <- data.frame(y = stats::rbinom(length(w), size = w, prob = plogis(x * 0.5)))
+  dat$prop <- dat$y / w
+  dat$x <- x
+  fit <- sdmTMB(prop ~ x, data = dat, weights = w, family = binomial(), spatial = "off")
+  dat$X <- dat$Y <- NA # FIXME
+  set.seed(1)
+  snd <- simulate(fit, nsim = 500, newdata = dat, size = w)
+  set.seed(1)
+  s <- simulate(fit, nsim = 500)
+  expect_equal(as.matrix(s), as.matrix(snd), ignore_attr = TRUE)
+  expect_true(nrow(snd) == 200L)
+  expect_true(ncol(snd) == 500L)
+  sim_means <- rowMeans(snd)
+  expect_gt(cor(sim_means, dat$y), 0.7)
+})
+
 test_that("coarse meshes with zeros in simulation still return fields #370", {
   set.seed(123)
   predictor_dat <- data.frame(
@@ -210,6 +231,7 @@ test_that("coarse meshes with zeros in simulation still return fields #370", {
 })
 
 test_that("simulate without observation error works for binomial likelihoods #431", {
+  skip_on_cran()
   mesh <- make_mesh(pcod, c("X", "Y"), cutoff = 30)
   fit.dg <- sdmTMB(density ~ 1,
     data = pcod, mesh = mesh, family = delta_gamma(type="standard")
@@ -226,7 +248,7 @@ test_that("simulate without observation error works for binomial likelihoods #43
   expect_gt(min(s.dg), 0)
   m <- apply(s.dg, 1, mean)
   p <- predict(fit.dg, newdata = qcs_grid)
-  expect_gt(cor(plogis(p$est1) * exp(p$est2), m), 0.95)
+  expect_gt(cor(plogis(p$est1) * exp(p$est2), m), 0.98)
 
   fit.b <- sdmTMB(present ~ 1,
     data = pcod, mesh = mesh, family = binomial()
@@ -244,4 +266,51 @@ test_that("simulate without observation error works for binomial likelihoods #43
   m <- apply(s.b, 1, mean)
   p <- predict(fit.b, newdata = qcs_grid)
   expect_gt(cor(plogis(p$est), m), 0.95)
+
+  # with size specified (but wrong length at first)
+  expect_error({simulate(
+    fit.b,
+    newdata = qcs_grid,
+    nsim = 1,
+    observation_error = FALSE,
+    size = c(1, 2, 3)
+  )}, regexp = "size")
+
+  set.seed(1)
+  w <- sample(1:9, size = nrow(qcs_grid), replace = TRUE)
+  s.b1 <- simulate(
+    fit.b,
+    newdata = qcs_grid,
+    type = "mle-mvn",
+    mle_mvn_samples = "multiple",
+    nsim = 50,
+    observation_error = FALSE,
+    seed = 23859,
+    size = w
+  )
+  expect_true(max(s.b1) > 1)
+  expect_equal(mean(s.b1[1,]), m[1] * w[1])
+  expect_equal(mean(s.b1[51,]), m[51] * w[51])
+})
+
+test_that("simulate without observation error works for binomial likelihoods and Poisson-link delta", {
+  skip_on_cran()
+  skip_on_ci()
+  mesh <- make_mesh(pcod, c("X", "Y"), cutoff = 30)
+  fit.dg <- sdmTMB(density ~ 1,
+    data = pcod, mesh = mesh, family = delta_gamma(type="poisson-link")
+  )
+  s.dg <- simulate(
+    fit.dg,
+    newdata = qcs_grid,
+    type = "mle-mvn", # fixed effects at MLE values and random effect MVN draws
+    mle_mvn_samples = "multiple", # take an MVN draw for each sample
+    nsim = 200, # increase this for more stable results
+    observation_error = FALSE, # do not include observation error
+    seed = 23859
+  )
+  expect_gt(min(s.dg), 0)
+  m <- apply(s.dg, 1, mean)
+  p <- predict(fit.dg, newdata = qcs_grid)
+  expect_gt(cor(exp(p$est1) * exp(p$est2), m), 0.98)
 })

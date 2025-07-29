@@ -1,3 +1,33 @@
+# sdmTMB 0.7.4
+
+## Minor improvements and fixes
+
+* Let `simulate.sdmTMB()` work with binomial GLMs with size specified via
+  `weights` and `newdata` supplied. #465
+
+* Fix issue with fold logic in LFO (leave-future-out) cross validation 
+  for `lfo_forecast > 1`. #454 Thanks to @Joseph-Barss.
+
+* Add `update.sdmTMB()` so that the mesh argument doesn't have to be 
+  specified if model is loaded in a fresh session. #461
+
+* Change default in `get_index()` etc. to `bias_correct = TRUE`. This is the
+  recommended setting for final inference and speed improvements within TMB
+  have made it more viable to include the bias correction by default. #456
+
+* Only retain Newton update parameters if they improve the objective function.
+  #455
+
+* Only run Newton updates if maximum absolute gradient is `>= 1e-9` to save
+  time. #455
+  
+* Suppress `nlminb()` warnings by default, which can usually be ignored by the
+  user and may be confusing. This can be controlled via
+  `sdmTMB(..., control = sdmTMBcontrol(suppress_nlminb_warnings = FALSE))`.
+  This option now mirrors tinyVAST.
+
+* Round time-varying AR(1) rho to 2 decimals in model printing/summary.
+
 # sdmTMB 0.7.2
 
 ## New features
