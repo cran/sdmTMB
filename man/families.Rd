@@ -24,6 +24,7 @@
 \alias{delta_truncated_nbinom1}
 \alias{delta_poisson_link_gamma}
 \alias{delta_poisson_link_lognormal}
+\alias{betabinomial}
 \alias{delta_beta}
 \title{Additional families}
 \usage{
@@ -33,11 +34,11 @@ lognormal(link = "log")
 
 gengamma(link = "log")
 
-gamma_mix(link = "log")
+gamma_mix(link = "log", p_extreme = NULL)
 
-lognormal_mix(link = "log")
+lognormal_mix(link = "log", p_extreme = NULL)
 
-nbinom2_mix(link = "log")
+nbinom2_mix(link = "log", p_extreme = NULL)
 
 nbinom2(link = "log")
 
@@ -47,7 +48,7 @@ truncated_nbinom2(link = "log")
 
 truncated_nbinom1(link = "log")
 
-student(link = "identity", df = 3)
+student(link = "identity", df = NULL)
 
 tweedie(link = "log")
 
@@ -55,13 +56,18 @@ censored_poisson(link = "log")
 
 delta_gamma(link1, link2 = "log", type = c("standard", "poisson-link"))
 
-delta_gamma_mix(link1 = "logit", link2 = "log")
+delta_gamma_mix(link1 = "logit", link2 = "log", p_extreme = NULL)
 
 delta_gengamma(link1, link2 = "log", type = c("standard", "poisson-link"))
 
 delta_lognormal(link1, link2 = "log", type = c("standard", "poisson-link"))
 
-delta_lognormal_mix(link1, link2 = "log", type = c("standard", "poisson-link"))
+delta_lognormal_mix(
+  link1,
+  link2 = "log",
+  type = c("standard", "poisson-link"),
+  p_extreme = NULL
+)
 
 delta_truncated_nbinom2(link1 = "logit", link2 = "log")
 
@@ -71,12 +77,18 @@ delta_poisson_link_gamma(link1 = "log", link2 = "log")
 
 delta_poisson_link_lognormal(link1 = "log", link2 = "log")
 
+betabinomial(link = "logit")
+
 delta_beta(link1 = "logit", link2 = "logit")
 }
 \arguments{
 \item{link}{Link.}
 
-\item{df}{Student-t degrees of freedom fixed value parameter.}
+\item{p_extreme}{Optional fixed probability for the extreme component. If NULL (default),
+this is estimated. If specified, must be a proportion between 0 and 1.}
+
+\item{df}{Student-t degrees of freedom parameter. Can be \code{NULL} to estimate (default)
+or a numeric value > 1 to fix at a specific value.}
 
 \item{link1}{Link for first part of delta/hurdle model. Defaults to \code{"logit"}
 for \code{type = "standard"} and \code{"log"} for \code{type = "poisson-link"}.}
@@ -95,6 +107,9 @@ elements \code{delta} (logical) and \code{type} (standard vs. Poisson-link).
 Additional families compatible with \code{\link[=sdmTMB]{sdmTMB()}}.
 }
 \details{
+The default \code{link1} for delta models of \code{type = "standard"} is \code{"logit"}.
+The default \code{link1} for delta models of \code{type = "poisson-link"} is \code{"log"}.
+
 \code{delta_poisson_link_gamma()} and \code{delta_poisson_link_lognormal()} have been
 deprecated in favour of \code{delta_gamma(type = "poisson-link")} and
 \code{delta_lognormal(type = "poisson-link")}.
@@ -108,10 +123,11 @@ should be the gamma.
 The families ending in \verb{_mix()} are 2-component mixtures where each
 distribution has its own mean but a shared scale parameter.
 (Thorson et al. 2011). See the model-description vignette for details.
-The parameter \code{plogis(log_p_mix)} is the probability of the extreme (larger)
+The parameter \code{p_extreme = plogis(logit_p_extreme)} is the probability of the extreme (larger)
 mean and \code{exp(log_ratio_mix) + 1} is the ratio of the larger extreme
 mean to the "regular" mean. You can see these parameters in
-\code{model$sd_report}.
+\code{model$sd_report}. The parameter \code{p_extreme} can be fixed a priori and passed
+in as a proportion for these families.
 
 The \code{nbinom2} negative binomial parameterization is the NB2 where the
 variance grows quadratically with the mean (Hilbe 2011).
@@ -119,7 +135,8 @@ variance grows quadratically with the mean (Hilbe 2011).
 The \code{nbinom1} negative binomial parameterization lets the variance grow
 linearly with the mean (Hilbe 2011).
 
-For \code{student()}, the degrees of freedom parameter is currently not estimated and is fixed at \code{df}.
+For \code{student()}, the degrees of freedom parameter is estimated by default (\code{df = NULL}).
+You can fix it at a specific value by providing a number > 1 (e.g., \code{df = 3}).
 }
 \examples{
 Beta(link = "logit")
@@ -132,7 +149,8 @@ nbinom2(link = "log")
 nbinom1(link = "log")
 truncated_nbinom2(link = "log")
 truncated_nbinom1(link = "log")
-student(link = "identity")
+student(link = "identity") # estimate df
+student(link = "identity", df = 3) # fix df at 3
 tweedie(link = "log")
 censored_poisson(link = "log")
 delta_gamma()
@@ -142,6 +160,7 @@ delta_lognormal()
 delta_lognormal_mix()
 delta_truncated_nbinom2()
 delta_truncated_nbinom1()
+betabinomial(link = "logit")
 delta_beta()
 }
 \references{
@@ -153,6 +172,11 @@ Biometrika 61(3): 539–544. \doi{10.1093/biomet/61.3.539}
 Stacy, E.W. 1962. A Generalization of the Gamma Distribution. The Annals of
 Mathematical Statistics 33(3): 1187–1192. Institute of Mathematical
 Statistics.
+
+Dunic, J.C., Conner, J., Anderson, S.C., and Thorson, J.T. 2025. The
+generalized gamma is a flexible distribution that outperforms alternatives
+when modelling catch rate data. ICES Journal of Marine Science 82(4):
+fsaf040. \doi{10.1093/icesjms/fsaf040}.
 
 \emph{Families ending in \verb{_mix()}}:
 

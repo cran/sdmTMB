@@ -21,7 +21,8 @@ enum valid_family {
   gamma_mix_family = 13,
   lognormal_mix_family = 14,
   nbinom2_mix_family = 15,
-  gengamma_family = 16
+  gengamma_family = 16,
+  betabinomial_family = 17
 };
 
 enum valid_link {
@@ -194,6 +195,7 @@ Type objective_function<Type>::operator()()
   DATA_INTEGER(calc_index_totals);
   DATA_INTEGER(calc_cog);
   DATA_INTEGER(calc_eao);
+  DATA_INTEGER(calc_weighted_avg);
   // DATA_INTEGER(calc_quadratic_range); // DELTA TODO
   DATA_VECTOR(area_i); // area per prediction grid cell for index standardization
 
@@ -214,11 +216,11 @@ Type objective_function<Type>::operator()()
 
   DATA_VECTOR(proj_lon);
   DATA_VECTOR(proj_lat);
+  DATA_VECTOR(proj_vector);  // User-provided vector for weighted average
 
   // Distribution
   DATA_IVECTOR(family);
   DATA_IVECTOR(link);
-  DATA_SCALAR(df);  // Student-t DF
   DATA_VECTOR(size); // binomial, via glmmTMB
 
   // SPDE objects from R-INLA
@@ -278,8 +280,9 @@ Type objective_function<Type>::operator()()
   PARAMETER_ARRAY(ln_kappa);    // Matern parameter
 
   PARAMETER(thetaf);           // tweedie only
+  PARAMETER(ln_student_df);    // student-t df (log(df - 1))
   PARAMETER(gengamma_Q);           // gengamma only
-  PARAMETER(logit_p_mix);           // ECE / positive mixture only
+  PARAMETER(logit_p_extreme);           // ECE / positive mixture only
   PARAMETER(log_ratio_mix);           // ECE / positive mixture only
 
   PARAMETER_VECTOR(ln_phi);           // sigma / dispersion / etc.
@@ -429,10 +432,10 @@ Type objective_function<Type>::operator()()
   Eigen::SparseMatrix<Type> Q_st2; // Precision matrix
 
   if (barrier) {
-    Q_s = Q_spde(spde_barrier, exp(ln_kappa(0,0)), barrier_scaling);
-    if (n_m > 1) Q_s2 = Q_spde(spde_barrier, exp(ln_kappa(0,1)), barrier_scaling);
-    if (!share_range(0)) Q_st = Q_spde(spde_barrier, exp(ln_kappa(1,0)), barrier_scaling);
-    if (!share_range(1) && n_m > 1) Q_st2 = Q_spde(spde_barrier, exp(ln_kappa(1,1)), barrier_scaling);
+    Q_s = sdmTMB::Q_spde_inlaspacetime(spde_barrier, ln_kappa(0,0), barrier_scaling);
+    if (n_m > 1) Q_s2 = sdmTMB::Q_spde_inlaspacetime(spde_barrier, ln_kappa(0,1), barrier_scaling);
+    if (!share_range(0)) Q_st = sdmTMB::Q_spde_inlaspacetime(spde_barrier, ln_kappa(1,0), barrier_scaling);
+    if (!share_range(1) && n_m > 1) Q_st2 = sdmTMB::Q_spde_inlaspacetime(spde_barrier, ln_kappa(1,1), barrier_scaling);
   } else {
     if (anisotropy) {
       matrix<Type> H = sdmTMB::MakeH(vector<Type>(ln_H_input.col(0)));
@@ -470,23 +473,37 @@ Type objective_function<Type>::operator()()
         Q_temp = Q_s2;
       }
       if (!omit_spatial_intercept) {
-        PARALLEL_REGION jnll += SCALE(GMRF(Q_temp, s), 1. / exp(ln_tau_O(m)))(omega_s.col(m));
+        Type spatial_scale = barrier ?
+          sdmTMB::barrier_scaling_factor(ln_tau_O(m), ln_kappa(0,m)) :
+          1. / exp(ln_tau_O(m));
+        PARALLEL_REGION jnll += SCALE(GMRF(Q_temp, s), spatial_scale)(omega_s.col(m));
         if (sim_re(0)) {
           vector<Type> omega_s_tmp(omega_s.rows());
           SIMULATE {
             GMRF(Q_temp, s).simulate(omega_s_tmp);
-            omega_s.col(m) = omega_s_tmp / exp(ln_tau_O(m));
+            if (barrier) {
+              omega_s.col(m) = omega_s_tmp * sdmTMB::barrier_scaling_factor(ln_tau_O(m), ln_kappa(0,m));
+            } else {
+              omega_s.col(m) = omega_s_tmp / exp(ln_tau_O(m));
+            }
           }
         }
       }
       if (spatial_covariate) {
         for (int z = 0; z < n_z; z++) {
-          PARALLEL_REGION jnll += SCALE(GMRF(Q_temp, s), 1. / exp(ln_tau_Z(z,m)))(zeta_s.col(m).col(z));
+          Type spatial_cov_scale = barrier ?
+            sdmTMB::barrier_scaling_factor(ln_tau_Z(z,m), ln_kappa(0,m)) :
+            1. / exp(ln_tau_Z(z,m));
+          PARALLEL_REGION jnll += SCALE(GMRF(Q_temp, s), spatial_cov_scale)(zeta_s.col(m).col(z));
           if (sim_re(3)) {
             vector<Type> zeta_s_tmp(zeta_s.col(m).rows());
             SIMULATE {
               GMRF(Q_s, s).simulate(zeta_s_tmp);
-              zeta_s.col(m).col(z) = zeta_s_tmp / exp(ln_tau_Z(z,m));
+              if (barrier) {
+                zeta_s.col(m).col(z) = zeta_s_tmp * sdmTMB::barrier_scaling_factor(ln_tau_Z(z,m), ln_kappa(0,m));
+              } else {
+                zeta_s.col(m).col(z) = zeta_s_tmp / exp(ln_tau_Z(z,m));
+              }
             }
           }
         }
@@ -505,14 +522,22 @@ Type objective_function<Type>::operator()()
     }
     if (!spatial_only(m)) {
       if (!ar1_fields(m) && !rw_fields(m)) {
-        for (int t = 0; t < n_t; t++)
-          PARALLEL_REGION jnll += SCALE(GMRF(Q_temp, s), 1. / exp(ln_tau_E_vec(t,m)))(epsilon_st.col(m).col(t));
+        for (int t = 0; t < n_t; t++) {
+          Type spatiotemporal_scale = barrier ?
+            sdmTMB::barrier_scaling_factor(ln_tau_E_vec(t,m), ln_kappa(1,m)) :
+            1. / exp(ln_tau_E_vec(t,m));
+          PARALLEL_REGION jnll += SCALE(GMRF(Q_temp, s), spatiotemporal_scale)(epsilon_st.col(m).col(t));
+        }
         if (sim_re(1)) {
           for (int t = 0; t < n_t; t++) {
             if (simulate_t(t)) {
               vector<Type> epsilon_st_tmp(epsilon_st.col(m).rows());
               SIMULATE {GMRF(Q_temp, s).simulate(epsilon_st_tmp);
-                epsilon_st.col(m).col(t) = epsilon_st_tmp / exp(ln_tau_E_vec(t,m));}
+                if (barrier) {
+                  epsilon_st.col(m).col(t) = epsilon_st_tmp * sdmTMB::barrier_scaling_factor(ln_tau_E_vec(t,m), ln_kappa(1,m));
+                } else {
+                  epsilon_st.col(m).col(t) = epsilon_st_tmp / exp(ln_tau_E_vec(t,m));
+                }}
             }
           }
         }
@@ -520,9 +545,15 @@ Type objective_function<Type>::operator()()
         if (ar1_fields(m)) { // not using separable(ar1()) so we can simulate by time step
           // PARALLEL_REGION jnll += SCALE(SEPARABLE(AR1(rho(m)), GMRF(Q_temp, s)), 1./exp(ln_tau_E(m)))(epsilon_st.col(m));
           // Split out by year so we can turn on/off simulation by year and model covariates of ln_tau_E:
-          PARALLEL_REGION jnll += SCALE(GMRF(Q_temp, s), 1. / exp(ln_tau_E_vec(0,m)))(epsilon_st.col(m).col(0));
+          Type ar1_scale_0 = barrier ?
+            sdmTMB::barrier_scaling_factor(ln_tau_E_vec(0,m), ln_kappa(1,m)) :
+            1. / exp(ln_tau_E_vec(0,m));
+          PARALLEL_REGION jnll += SCALE(GMRF(Q_temp, s), ar1_scale_0)(epsilon_st.col(m).col(0));
           for (int t = 1; t < n_t; t++) {
-            PARALLEL_REGION jnll += SCALE(GMRF(Q_temp, s), 1. /exp(ln_tau_E_vec(t,m)))((epsilon_st.col(m).col(t) -
+            Type ar1_scale_t = barrier ?
+              sdmTMB::barrier_scaling_factor(ln_tau_E_vec(t,m), ln_kappa(1,m)) :
+              1. / exp(ln_tau_E_vec(t,m));
+            PARALLEL_REGION jnll += SCALE(GMRF(Q_temp, s), ar1_scale_t)((epsilon_st.col(m).col(t) -
               rho(m) * epsilon_st.col(m).col(t - 1))/sqrt(1. - rho(m) * rho(m)));
           }
           Type n_cols = epsilon_st.col(m).cols();
@@ -542,8 +573,10 @@ Type objective_function<Type>::operator()()
                   // https://kaskr.github.io/adcomp/classdensity_1_1AR1__t.html
                   Type ar1_scaler = sqrt(1. - rho(m) * rho(m));
                   if (t == 0) {
-                    epsilon_st.col(m).col(0) = epsilon_st_tmp; // no scaling of first step
+                    // marginal variance for first time step
+                    epsilon_st.col(m).col(0) = epsilon_st_tmp;
                   } else {
+                    // scaled (innovation) SD for subsequent steps to achieve desired marginal SD
                     epsilon_st.col(m).col(t) = rho(m) * epsilon_st.col(m).col(t-1) + epsilon_st_tmp * ar1_scaler;
                   }
                 }
@@ -552,10 +585,15 @@ Type objective_function<Type>::operator()()
           }
           ADREPORT(rho);
         } else if (rw_fields(m)) {
-          PARALLEL_REGION jnll += SCALE(GMRF(Q_temp, s), 1./exp(ln_tau_E_vec(0,m)))(epsilon_st.col(m).col(0));
+          Type rw_scale_0 = barrier ?
+            sdmTMB::barrier_scaling_factor(ln_tau_E_vec(0,m), ln_kappa(1,m)) :
+            1. / exp(ln_tau_E_vec(0,m));
+          PARALLEL_REGION jnll += SCALE(GMRF(Q_temp, s), rw_scale_0)(epsilon_st.col(m).col(0));
           for (int t = 1; t < n_t; t++) {
-            PARALLEL_REGION jnll += SCALE(GMRF(Q_temp, s),
-                1./exp(ln_tau_E_vec(t,m)))(epsilon_st.col(m).col(t) - epsilon_st.col(m).col(t - 1));
+            Type rw_scale_t = barrier ?
+              sdmTMB::barrier_scaling_factor(ln_tau_E_vec(t,m), ln_kappa(1,m)) :
+              1. / exp(ln_tau_E_vec(t,m));
+            PARALLEL_REGION jnll += SCALE(GMRF(Q_temp, s), rw_scale_t)(epsilon_st.col(m).col(t) - epsilon_st.col(m).col(t - 1));
           }
           if (sim_re(1)) {
             for (int t = 0; t < n_t; t++) {
@@ -679,14 +717,14 @@ Type objective_function<Type>::operator()()
               if (sim_re(4) && simulate_t(t)) {
                 // https://kaskr.github.io/adcomp/classdensity_1_1AR1__t.html
                 SIMULATE{
-                  b_rw_t(t, k, m) = rho_time(k, m) * rnorm(Type(0), sigma_V(k,m)) + 
+                  b_rw_t(t, k, m) = rho_time(k, m) * rnorm(Type(0), sigma_V(k,m)) +
                     ar1_sigma * rnorm(Type(0), sigma_V(k,m));
                 }
               }
             } else {
               if (sim_re(4) && simulate_t(t)) {
                 SIMULATE{
-                  b_rw_t(t, k, m) = rho_time(k, m) * b_rw_t(t-1, k, m) + 
+                  b_rw_t(t, k, m) = rho_time(k, m) * b_rw_t(t-1, k, m) +
                     ar1_sigma * rnorm(Type(0), sigma_V(k,m));
                 }
               }
@@ -853,7 +891,7 @@ Type objective_function<Type>::operator()()
   // close to zero: use for count data (cf binomial()$initialize)
 #define zt_lik_nearzero(x,loglik_exp) ((x < Type(0.001)) ? -INFINITY : loglik_exp)
 
-  Type s1, s2, s3, lognzprob, tmp_ll, ll_1, ll_2, p_mix, mix_ratio, tweedie_p, s2_large;
+  Type s1, s2, s3, lognzprob, tmp_ll, ll_1, ll_2, p_extreme, mix_ratio, tweedie_p, s2_large;
 
   // calcs for mix distr. first:
   int pos_model;
@@ -867,14 +905,14 @@ Type objective_function<Type>::operator()()
   case gamma_mix_family:
   case lognormal_mix_family:
   case nbinom2_mix_family: {
-    p_mix = invlogit(logit_p_mix); // probability of larger event
+    p_extreme = invlogit(logit_p_extreme); // probability of larger event
     mix_ratio = exp(log_ratio_mix) + Type(1.); // ratio of large:small values, constrained > 1.0
     for (int i = 0; i < n_i; i++) {
       mu_i_large(i) = exp(log(mu_i(i, pos_model)) + log(mix_ratio));  // mean of large component = mean of smaller * ratio
     }
-    ADREPORT(logit_p_mix);
+    ADREPORT(logit_p_extreme);
     ADREPORT(log_ratio_mix);
-    REPORT(p_mix);
+    REPORT(p_extreme);
     REPORT(mix_ratio);
     break;
   }
@@ -930,6 +968,18 @@ Type objective_function<Type>::operator()()
               if (sim_obs) SIMULATE{y_i(i,m) = rbinom(size(i), invlogit(mu_i(i,m)));} // hardcoded invlogit b/c mu_i in logit space
               if (notNA) devresid(i,m) = sdmTMB::sign(y_i(i,m) - invlogit(mu_i(i,m))) *
                 pow(-2.*((1-y_i(i,m))*log(1.-invlogit(mu_i(i,m))) + y_i(i,m)*log(invlogit(mu_i(i,m)))), 0.5);
+            }
+            break;
+          }
+          case betabinomial_family: {
+            // Transform to logit scale independent of link
+            s3 = LogitInverseLink(eta_i(i,m), link(m)); // logit(p)
+            s1 = log(InverseLink(s3, logit_link)) + log(phi(m)); // log(mu*phi)
+            s2 = log(InverseLink(-s3, logit_link)) + log(phi(m)); // log((1-mu)*phi)
+            if (notNA) tmp_ll = sdmTMB::dbetabinom_robust(y_i(i,m), s1, s2, size(i), true);
+            if (sim_obs) SIMULATE{
+              Type rbeta_val = rbeta(exp(s1), exp(s2));
+              y_i(i,m) = rbinom(size(i), rbeta_val);
             }
             break;
           }
@@ -1009,9 +1059,14 @@ Type objective_function<Type>::operator()()
             break;
           }
           case student_family: {
-            if (notNA) tmp_ll = sdmTMB::dstudent(y_i(i,m), mu_i(i,m), exp(ln_phi(m)), df, true);
-            if (notNA) devresid(i,m) = sdmTMB::devresid_nbinom2(y_i(i,m), s1, s1 - ln_phi(m));
-            if (sim_obs) SIMULATE{y_i(i,m) = mu_i(i,m) + phi(m) * rt(df);}
+            Type student_df = exp(ln_student_df) + Type(1.0);
+            if (notNA) tmp_ll = sdmTMB::dstudent(y_i(i,m), mu_i(i,m), phi(m), student_df, true);
+            if (notNA) {
+              Type resid = (y_i(i,m) - mu_i(i,m)) / phi(m);
+              Type dev = (student_df + Type(1.0)) * log(Type(1.0) + resid * resid / student_df);
+              devresid(i,m) = sdmTMB::sign(y_i(i,m) - mu_i(i,m)) * sqrt(dev);
+            }
+            if (sim_obs) SIMULATE{y_i(i,m) = mu_i(i,m) + phi(m) * rt(student_df);}
 
             break;
           }
@@ -1025,12 +1080,12 @@ Type objective_function<Type>::operator()()
           case gamma_mix_family: {
             s1 = exp(ln_phi(m));        // shape
             s2 = mu_i(i,m) / s1;        // scale
-            ll_1 = log(Type(1. - p_mix)) + dgamma(y_i(i,m), s1, s2, true);
+            ll_1 = log(Type(1. - p_extreme)) + dgamma(y_i(i,m), s1, s2, true);
             s2_large = mu_i_large(i) / s1;    // scale
-            ll_2 = log(p_mix) + dgamma(y_i(i,m), s1, s2_large, true);
+            ll_2 = log(p_extreme) + dgamma(y_i(i,m), s1, s2_large, true);
             if (notNA) tmp_ll = sdmTMB::log_sum_exp(ll_1, ll_2);
             if (sim_obs) SIMULATE{
-              if(rbinom(Type(1),p_mix) == 0) {
+              if(rbinom(Type(1),p_extreme) == 0) {
                 y_i(i,m) = rgamma(s1, s2);
               } else {
                 y_i(i,m) = rgamma(s1, s2_large);
@@ -1039,11 +1094,11 @@ Type objective_function<Type>::operator()()
             break;
           }
         case lognormal_mix_family: {
-          ll_1 = log(Type(1. - p_mix)) + sdmTMB::dlnorm(y_i(i,m), log(mu_i(i,m)) - pow(phi(m), Type(2)) / Type(2), phi(m), true);
-          ll_2 = log(p_mix) + sdmTMB::dlnorm(y_i(i,m), log(mu_i_large(i)) - pow(phi(m), Type(2)) / Type(2), phi(m), true);
+          ll_1 = log(Type(1. - p_extreme)) + sdmTMB::dlnorm(y_i(i,m), log(mu_i(i,m)) - pow(phi(m), Type(2)) / Type(2), phi(m), true);
+          ll_2 = log(p_extreme) + sdmTMB::dlnorm(y_i(i,m), log(mu_i_large(i)) - pow(phi(m), Type(2)) / Type(2), phi(m), true);
           if (notNA) tmp_ll = sdmTMB::log_sum_exp(ll_1, ll_2);
           if (sim_obs) SIMULATE{
-            if (rbinom(Type(1), p_mix) == 0) {
+            if (rbinom(Type(1), p_extreme) == 0) {
               y_i(i,m) = exp(rnorm(log(mu_i(i,m)) - pow(phi(m), Type(2)) / Type(2), phi(m)));;
             } else {
               y_i(i,m) = exp(rnorm(log(mu_i_large(i)) - pow(phi(m), Type(2)) / Type(2), phi(m)));;
@@ -1056,15 +1111,15 @@ Type objective_function<Type>::operator()()
           s2 = Type(2.) * s1 - ln_phi(m); // log(var - mu)
           Type s1_large = log(mu_i_large(i));
           Type s2_large = Type(2.) * s1_large - ln_phi(m);
-          ll_1 = log(Type(1. - p_mix)) + dnbinom_robust(y_i(i,m), s1, s2, true);
-          ll_2 = log(p_mix) + dnbinom_robust(y_i(i,m), s1_large, s2_large, true);
+          ll_1 = log(Type(1. - p_extreme)) + dnbinom_robust(y_i(i,m), s1, s2, true);
+          ll_2 = log(p_extreme) + dnbinom_robust(y_i(i,m), s1_large, s2_large, true);
           if (notNA) tmp_ll = sdmTMB::log_sum_exp(ll_1, ll_2);
           if (sim_obs) SIMULATE{
             s1 = mu_i(i,m);
             s2 = mu_i(i,m) * (Type(1) + mu_i(i,m) / phi(m));
             s1_large = mu_i_large(i);
             s2_large = mu_i_large(i) * (Type(1) + mu_i_large(i) / phi(m));
-            if (rbinom(Type(1), p_mix) == 0) {
+            if (rbinom(Type(1), p_extreme) == 0) {
               y_i(i,m) = rnbinom2(s1, s2);
             } else {
               y_i(i,m) = rnbinom2(s1_large, s2_large);
@@ -1335,13 +1390,13 @@ Type objective_function<Type>::operator()()
 
     // for families that implement mixture models, adjust proj_eta by
     // proportion and ratio of means
-    // (1 - p_mix) * mu_i(i,m) + p_mix * (mu(i,m) * mix_ratio);
+    // (1 - p_extreme) * mu_i(i,m) + p_extreme * (mu(i,m) * mix_ratio);
     switch (family(pos_model)) {
       case gamma_mix_family:
       case lognormal_mix_family:
       case nbinom2_mix_family:
-        proj_eta.col(pos_model) = log((1. - p_mix) * exp(proj_eta.col(pos_model)) + // regular part
-               p_mix * exp(proj_eta.col(pos_model)) * mix_ratio); //large part
+        proj_eta.col(pos_model) = log((1. - p_extreme) * exp(proj_eta.col(pos_model)) + // regular part
+               p_extreme * exp(proj_eta.col(pos_model)) * mix_ratio); //large part
         break;
       default:
         break;
@@ -1398,7 +1453,7 @@ Type objective_function<Type>::operator()()
         break;
     }
 
-    if (calc_index_totals || calc_cog || calc_eao) {
+    if (calc_index_totals || calc_cog || calc_eao || calc_weighted_avg) {
       // ------------------ Derived quantities ---------------------------------
       Type t1;
       Type t2;
@@ -1492,6 +1547,31 @@ Type objective_function<Type>::operator()()
           }
         }
       }
+
+      if (calc_weighted_avg) {
+        // Weighted average of user-provided vector:
+        vector<Type> weighted_avg(n_t);
+        weighted_avg.setZero();
+        // Low-rank sparse hessian bias-correction
+        PARAMETER_VECTOR(eps_index);
+        for (int i = 0; i < n_p; i++) {
+          weighted_avg(proj_year(i)) += proj_vector(i) * mu_combined(i) * area_i(i);
+        }
+        for (int t = 0; t < n_t; t++) {
+          weighted_avg(t) /= total(t);
+        }
+        REPORT(weighted_avg);
+        ADREPORT(weighted_avg);
+        if (eps_index.size() > 0) {
+          Type S;
+          for (int t=0; t < n_t; t++) {
+            S = weighted_avg(t);
+            S = newton::Tag(S); // Set lowrank tag on S
+            jnll += eps_index(t) * S;
+          }
+        }
+      }
+
       if (calc_eao) { // effective area occupied: Thorson et al. 2016 doi:10.1098/rspb.2016.1853
         vector<Type> sum_dens(n_t);
         vector<Type> mean_dens(n_t);
@@ -1597,6 +1677,10 @@ Type objective_function<Type>::operator()()
   }
 
   if (family(0) == tweedie_family) ADREPORT(tweedie_p); // #302
+  if (family(0) == student_family) {
+    Type student_df = exp(ln_student_df) + Type(1.0);
+    ADREPORT(student_df);
+  }
 
   REPORT(epsilon_st_A_vec);   // spatio-temporal effects; vector
   REPORT(b_rw_t);   // time-varying effects

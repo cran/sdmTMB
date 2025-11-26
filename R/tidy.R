@@ -262,6 +262,27 @@ tidy.sdmTMB <- function(x, effects = c("fixed", "ran_pars", "ran_vals", "ran_vco
     ii <- ii + 1
   }
 
+  if ("student" %in% x$family$family) {
+    # Check if df was fixed (mapped to NA) or estimated
+    df_fixed <- !is.null(x$tmb_map$ln_student_df) && is.na(x$tmb_map$ln_student_df[1])
+    if (df_fixed) {
+      # Fixed df: report the fixed value with NA std.error
+      df_value <- exp(est$ln_student_df) + 1
+      out_re$student_df <- data.frame(
+        term = "student_df", estimate = df_value,
+        std.error = NA_real_, conf.low = NA_real_, conf.high = NA_real_,
+        stringsAsFactors = FALSE)
+    } else {
+      # Estimated df: report with confidence intervals
+      out_re$student_df <- data.frame(
+        term = "student_df", estimate = exp(est$ln_student_df) + 1,
+        std.error = se$student_df, stringsAsFactors = FALSE)
+      out_re$student_df$conf.low <- exp(est$ln_student_df - crit * se$ln_student_df) + 1
+      out_re$student_df$conf.high <- exp(est$ln_student_df + crit * se$ln_student_df) + 1
+    }
+    ii <- ii + 1
+  }
+
   if ("ar1_phi" %in% names(est)) {
     ar_phi <- est$ar1_phi
     ar_phi_se <- se$ar1_phi
@@ -286,13 +307,28 @@ tidy.sdmTMB <- function(x, effects = c("fixed", "ran_pars", "ran_vals", "ran_vco
   if (identical(est$ln_tau_Z, 0)) out_re <- out_re[out_re$term != "sigma_Z", ]
   if (is.na(x$tmb_map$ar1_phi[model])) out_re <- out_re[out_re$term != "rho", ]
 
+  # Handle anisotropic ranges
+  aniso_ranges <- get_anisotropic_ranges(x, m = model)
+  if (!is.null(aniso_ranges) && "range" %in% out_re$term) {
+    # Remove existing range row(s) and add anisotropic ranges
+    out_re <- out_re[out_re$term != "range", ]
+    aniso_df <- aniso_ranges_to_df(aniso_ranges)
+    if (!is.null(aniso_df)) {
+      # Add columns to match out_re structure
+      aniso_df$std.error <- NA_real_
+      aniso_df$conf.low <- NA_real_
+      aniso_df$conf.high <- NA_real_
+      out_re <- rbind(out_re, aniso_df)
+    }
+  }
+
   if (!conf.int) {
     out_re[["conf.low"]] <- NULL
     out_re[["conf.high"]] <- NULL
   }
 
   if (sum(x$tmb_data$n_re_groups) > 0L) { # we have random intercepts/slopes
-    temp <- get_re_tidy_list(x, crit = crit, model = model)
+    temp <- get_re_tidy_list(x, crit = crit, model = model, delta = delta)
     cov_mat_list <- list(est = temp$cov_matrices)
     if(conf.int) {
       cov_mat_list[["lo"]] <- temp$cov_matrices_lo
@@ -321,7 +357,8 @@ tidy.sdmTMB <- function(x, effects = c("fixed", "ran_pars", "ran_vals", "ran_vco
     p <- print_smooth_effects(x, m = model, silent = TRUE)
     ln_sds <- p$ln_sd_estimates
     # Convert from log-scale to natural scale and update term names
-    term_names <- gsub("^SD_s\\(", "sd__s(", row.names(ln_sds))
+    term_names <- gsub("^ln_SD_s\\(", "sd__s(", row.names(ln_sds))
+    term_names <- gsub("^ln_SD_t2\\(", "sd__t2(", term_names)
     # add on CIs - calculate in log space then transform
     ln_sds_df <- data.frame(term = term_names,
                             estimate = exp(ln_sds[,1]),
@@ -343,15 +380,26 @@ tidy.sdmTMB <- function(x, effects = c("fixed", "ran_pars", "ran_vals", "ran_vco
     time_slices <- x$time_lu$time_from_data
     yrs <- rep(time_slices, times = length(tv_names))
 
-    out_ranef_tv <- data.frame(
-      model = model,
-      term = paste0(rep(tv_names, each = length(time_slices)), ":", yrs),
-      estimate = c(est$b_rw_t),
-      std.error = c(se$b_rw_t),
-      conf.low = c(est$b_rw_t) - crit * c(se$b_rw_t),
-      conf.high = c(est$b_rw_t) + crit * c(se$b_rw_t),
-      stringsAsFactors = FALSE
-    )
+    if (delta) {
+      out_ranef_tv <- data.frame(
+        model = model,
+        term = paste0(rep(tv_names, each = length(time_slices)), ":", yrs),
+        estimate = c(est$b_rw_t),
+        std.error = c(se$b_rw_t),
+        conf.low = c(est$b_rw_t) - crit * c(se$b_rw_t),
+        conf.high = c(est$b_rw_t) + crit * c(se$b_rw_t),
+        stringsAsFactors = FALSE
+      )
+    } else {
+      out_ranef_tv <- data.frame(
+        term = paste0(rep(tv_names, each = length(time_slices)), ":", yrs),
+        estimate = c(est$b_rw_t),
+        std.error = c(se$b_rw_t),
+        conf.low = c(est$b_rw_t) - crit * c(se$b_rw_t),
+        conf.high = c(est$b_rw_t) + crit * c(se$b_rw_t),
+        stringsAsFactors = FALSE
+      )
+    }
 
     if(is.null(out_ranef)) {
       out_ranef <- out_ranef_tv
@@ -363,9 +411,15 @@ tidy.sdmTMB <- function(x, effects = c("fixed", "ran_pars", "ran_vals", "ran_vco
   }
 
   # re-order names to match those in "ran_vals"
-  out_re$model <- rep(model, nrow(out_re))
+  if (delta) {
+    out_re$model <- rep(model, nrow(out_re))
+  }
   # group_name and term might not exist
-  new_names <- c("model", "group_name", "term", "estimate", "std.error")
+  if (delta) {
+    new_names <- c("model", "group_name", "term", "estimate", "std.error")
+  } else {
+    new_names <- c("group_name", "term", "estimate", "std.error")
+  }
   if(conf.int) new_names <- c(new_names, "conf.low", "conf.high")
   new_names <- new_names[new_names %in% names(out_re)]
   out_re <- out_re[, new_names]
@@ -394,6 +448,93 @@ tidy.sdmTMB <- function(x, effects = c("fixed", "ran_pars", "ran_vals", "ran_vco
   }
 }
 
+# Convert anisotropic ranges list to a data frame
+aniso_ranges_to_df <- function(aniso_ranges) {
+  if (is.null(aniso_ranges) || length(aniso_ranges) == 0) {
+    return(NULL)
+  }
+
+  # Build term-estimate pairs
+  terms <- character()
+  estimates <- numeric()
+
+  for (name in names(aniso_ranges)) {
+    suffix <- if (name == "min") "range_min"
+              else if (name == "max") "range_max"
+              else paste0("range_", name)
+    terms <- c(terms, suffix)
+    estimates <- c(estimates, aniso_ranges[[name]])
+  }
+
+  data.frame(
+    term = terms,
+    estimate = estimates,
+    stringsAsFactors = FALSE
+  )
+}
+
+# Internal helper to extract anisotropic range min/max values
+# Returns NULL if not anisotropic, otherwise a list with range info
+get_anisotropic_ranges <- function(x, m = 1L) {
+  # Check if model has anisotropy enabled
+  if (!as.logical(x$tmb_data$anisotropy)) {
+    return(NULL)
+  }
+
+  # Check if H matrix is available
+  H_exists <- any(grepl(
+    pattern = "ln_H_input",
+    x = names(x$sd_report$par.fixed),
+    ignore.case = TRUE
+  ))
+  if (!H_exists) {
+    return(NULL)
+  }
+
+  # Calculate anisotropy components using shared helper
+  comp <- calculate_anisotropy_components(x, m = m)
+
+  # Helper to calculate range from eigenvector
+  rss <- function(V) sqrt(sum(V[1]^2 + V[2]^2))
+
+  # Build output list
+  result <- list()
+
+  # Add spatial field ranges if spatial is on
+  if (x$spatial[m] != "off") {
+    result$spatial_min <- rss(comp$min_s)
+    result$spatial_max <- rss(comp$maj_s)
+  }
+
+  # Add spatiotemporal field ranges if spatiotemporal is on
+  if (x$spatiotemporal[m] != "off") {
+    result$spatiotemporal_min <- rss(comp$min_st)
+    result$spatiotemporal_max <- rss(comp$maj_st)
+  }
+
+  # Determine if we should use simpler names (only one field active, or shared range)
+  only_spatial <- (x$spatial[m] != "off" && x$spatiotemporal[m] == "off")
+  only_spatiotemporal <- (x$spatial[m] == "off" && x$spatiotemporal[m] != "off")
+  shared_range <- (x$tmb_data$share_range[m] == 1L &&
+                   x$spatial[m] == "on" &&
+                   x$spatiotemporal[m] != "off")
+
+  # Use simpler names if only one field is active or ranges are shared
+  if (only_spatial || shared_range) {
+    result <- list(
+      min = result$spatial_min,
+      max = result$spatial_max
+    )
+  } else if (only_spatiotemporal) {
+    result <- list(
+      min = result$spatiotemporal_min,
+      max = result$spatiotemporal_max
+    )
+  }
+
+  result
+}
+
 # Extract and format random effect estimates from sdmTMB model output
 #
 # This function extracts random effect estimates, including individual random intercepts
@@ -406,7 +547,7 @@ tidy.sdmTMB <- function(x, effects = c("fixed", "ran_pars", "ran_vals", "ran_vco
 #   crit = stats::qnorm(1 - (1 - conf.level) / 2)
 # @importFrom stats aggregate
 
-get_re_tidy_list <- function(x, crit, model = 1) {
+get_re_tidy_list <- function(x, crit, model = 1, delta = FALSE) {
   re_b_dfs <- add_model_index(x$split_formula, "re_b_df")
   re_b_df <- do.call(rbind, re_b_dfs)
   names(re_b_df)[names(re_b_df) == "group_indices"] <- "group_id"
@@ -455,7 +596,11 @@ get_re_tidy_list <- function(x, crit, model = 1) {
 
   # more sensible re-ordering
   re_b_df$group_id <- NULL
-  re_b_df <- re_b_df[, c("model", "group_name", "term", "level_ids", "estimate", "std.error", "conf.low", "conf.high")]
+  if (delta) {
+    re_b_df <- re_b_df[, c("model", "group_name", "term", "level_ids", "estimate", "std.error", "conf.low", "conf.high")]
+  } else {
+    re_b_df <- re_b_df[, c("group_name", "term", "level_ids", "estimate", "std.error", "conf.low", "conf.high")]
+  }
   # remove ":" in the level_ids
   re_b_df$level_ids <- sapply(strsplit(re_b_df$level_ids, ":"), function(x) x[2])
   out_ranef <- re_b_df
@@ -533,6 +678,12 @@ generics::tidy
 #' @rdname tidy.sdmTMB
 #' @export
 tidy.sdmTMB_cv <- function(x, ...) {
+  if (is.null(x$models)) {
+    cli_abort(c(
+      "Models were not saved during cross-validation.",
+      "i" = "Set `save_models = TRUE` in `sdmTMB_cv()` to use `tidy()`."
+    ))
+  }
   x <- x$models
   out <- lapply(seq_along(x), function(i) {
     df <- tidy.sdmTMB(x[[i]], ...)

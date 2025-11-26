@@ -36,6 +36,9 @@ add_to_family <- function(x) {
 #' elements `delta` (logical) and `type` (standard vs. Poisson-link).
 #'
 #' @details
+#' The default `link1` for delta models of `type = "standard"` is `"logit"`.
+#' The default `link1` for delta models of `type = "poisson-link"` is `"log"`.
+#'
 #' `delta_poisson_link_gamma()` and `delta_poisson_link_lognormal()` have been
 #' deprecated in favour of `delta_gamma(type = "poisson-link")` and
 #' `delta_lognormal(type = "poisson-link")`.
@@ -49,8 +52,10 @@ Beta <- function(link = "logit") {
   okLinks <- c("logit")
   if (linktemp %in% okLinks)
     stats <- stats::make.link(linktemp)
-  else if (is.character(link))
+  else if (is.character(link)) {
     stats <- stats::make.link(link)
+    linktemp <- link
+  }
   x <- c(list(family = "Beta", link = linktemp), stats)
   add_to_family(x)
 }
@@ -66,8 +71,10 @@ lognormal <- function(link = "log") {
   okLinks <- c("identity", "log", "inverse")
   if (linktemp %in% okLinks)
     stats <- stats::make.link(linktemp)
-  else if (is.character(link))
+  else if (is.character(link)) {
     stats <- stats::make.link(link)
+    linktemp <- link
+  }
   x <- c(list(family = "lognormal", link = linktemp), stats)
   add_to_family(x)
 }
@@ -93,6 +100,11 @@ lognormal <- function(link = "log") {
 #' Stacy, E.W. 1962. A Generalization of the Gamma Distribution. The Annals of
 #' Mathematical Statistics 33(3): 1187–1192. Institute of Mathematical
 #' Statistics.
+#'
+#' Dunic, J.C., Conner, J., Anderson, S.C., and Thorson, J.T. 2025. The
+#' generalized gamma is a flexible distribution that outperforms alternatives
+#' when modelling catch rate data. ICES Journal of Marine Science 82(4):
+#' fsaf040. \doi{10.1093/icesjms/fsaf040}.
 
 gengamma <- function(link = "log") {
   linktemp <- substitute(link)
@@ -101,8 +113,10 @@ gengamma <- function(link = "log") {
   okLinks <- c("identity", "log", "inverse")
   if (linktemp %in% okLinks)
     stats <- stats::make.link(linktemp)
-  else if (is.character(link))
+  else if (is.character(link)) {
     stats <- stats::make.link(link)
+    linktemp <- link
+  }
   x <- c(list(family = "gengamma", link = linktemp), stats)
   add_to_family(x)
 }
@@ -110,10 +124,11 @@ gengamma <- function(link = "log") {
 #' @details The families ending in `_mix()` are 2-component mixtures where each
 #'   distribution has its own mean but a shared scale parameter.
 #'   (Thorson et al. 2011). See the model-description vignette for details.
-#'   The parameter `plogis(log_p_mix)` is the probability of the extreme (larger)
+#'   The parameter `p_extreme = plogis(logit_p_extreme)` is the probability of the extreme (larger)
 #'   mean and `exp(log_ratio_mix) + 1` is the ratio of the larger extreme
 #'   mean to the "regular" mean. You can see these parameters in
-#'   `model$sd_report`.
+#'   `model$sd_report`. The parameter `p_extreme` can be fixed a priori and passed
+#'   in as a proportion for these families.
 #' @references
 #'
 #' *Families ending in `_mix()`*:
@@ -122,54 +137,85 @@ gengamma <- function(link = "log") {
 #' in single- and multi-species survey data using mixture distribution models.
 #' Can. J. Fish. Aquat. Sci. 68(9): 1681–1693. \doi{10.1139/f2011-086}.
 
+#' @param p_extreme Optional fixed probability for the extreme component. If NULL (default),
+#'   this is estimated. If specified, must be a proportion between 0 and 1.
 #' @export
 #' @rdname families
 #' @examples
 #' gamma_mix(link = "log")
-gamma_mix <- function(link = "log") {
+gamma_mix <- function(link = "log", p_extreme = NULL) {
   linktemp <- substitute(link)
   if (!is.character(linktemp))
     linktemp <- deparse(linktemp)
   okLinks <- c("identity", "log", "inverse")
   if (linktemp %in% okLinks)
     stats <- stats::make.link(linktemp)
-  else if (is.character(link))
+  else if (is.character(link)) {
     stats <- stats::make.link(link)
-  x <- c(list(family = "gamma_mix", link = linktemp), stats)
+    linktemp <- link
+  }
+
+  if (!is.null(p_extreme)) {
+    if (!is.numeric(p_extreme) || p_extreme <= 0 || p_extreme >= 1) {
+      stop("p_extreme must be NULL or a proportion between 0 and 1")
+    }
+  }
+
+  x <- c(list(family = "gamma_mix", link = linktemp, p_extreme = p_extreme), stats)
   add_to_family(x)
 }
 
+#' @param p_extreme Optional fixed probability for the extreme component. If NULL (default),
+#'   this is estimated. If specified, must be a proportion between 0 and 1.
 #' @export
 #' @rdname families
 #' @examples
 #' lognormal_mix(link = "log")
-lognormal_mix <- function(link = "log") {
+lognormal_mix <- function(link = "log", p_extreme = NULL) {
   linktemp <- substitute(link)
   if (!is.character(linktemp))
     linktemp <- deparse(linktemp)
   okLinks <- c("identity", "log", "inverse")
   if (linktemp %in% okLinks)
     stats <- stats::make.link(linktemp)
-  else if (is.character(link))
+  else if (is.character(link)) {
     stats <- stats::make.link(link)
-  x <- c(list(family = "lognormal_mix", link = linktemp), stats)
+    linktemp <- link
+  }
+
+  if (!is.null(p_extreme)) {
+    if (!is.numeric(p_extreme) || p_extreme <= 0 || p_extreme >= 1) {
+      stop("p_extreme must be NULL or a proportion between 0 and 1")
+    }
+  }
+  x <- c(list(family = "lognormal_mix", link = linktemp, p_extreme = p_extreme), stats)
   add_to_family(x)
 }
 
+#' @param p_extreme Optional fixed probability for the extreme component. If NULL (default),
+#'   this is estimated. If specified, must be a proportion between 0 and 1.
 #' @export
 #' @rdname families
 #' @examples
 #' nbinom2_mix(link = "log")
-nbinom2_mix <- function(link = "log") {
+nbinom2_mix <- function(link = "log", p_extreme = NULL) {
   linktemp <- substitute(link)
   if (!is.character(linktemp))
     linktemp <- deparse(linktemp)
   okLinks <- c("identity", "log", "inverse")
   if (linktemp %in% okLinks)
     stats <- stats::make.link(linktemp)
-  else if (is.character(link))
+  else if (is.character(link)) {
     stats <- stats::make.link(link)
-  x <- c(list(family = "nbinom2_mix", link = linktemp), stats)
+    linktemp <- link
+  }
+
+  if (!is.null(p_extreme)) {
+    if (!is.numeric(p_extreme) || p_extreme <= 0 || p_extreme >= 1) {
+      stop("p_extreme must be NULL or a proportion between 0 and 1")
+    }
+  }
+  x <- c(list(family = "nbinom2_mix", link = linktemp, p_extreme = p_extreme), stats)
   add_to_family(x)
 }
 
@@ -192,8 +238,10 @@ nbinom2 <- function(link = "log") {
   okLinks <- c("log")
   if (linktemp %in% okLinks)
     stats <- stats::make.link(linktemp)
-  else if (is.character(link))
+  else if (is.character(link)) {
     stats <- stats::make.link(link)
+    linktemp <- link
+  }
 
   v <- function(mu, theta) {
 
@@ -216,8 +264,10 @@ nbinom1 <- function(link = "log") {
   okLinks <- c("log")
   if (linktemp %in% okLinks)
     stats <- stats::make.link(linktemp)
-  else if (is.character(link))
+  else if (is.character(link)) {
     stats <- stats::make.link(link)
+    linktemp <- link
+  }
   x <- c(list(family = "nbinom1", link = linktemp), stats)
   add_to_family(x)
 }
@@ -235,8 +285,10 @@ truncated_nbinom2 <- function(link = "log") {
   okLinks <- c("log")
   if (linktemp %in% okLinks)
     stats <- stats::make.link(linktemp)
-  else if (is.character(link))
+  else if (is.character(link)) {
     stats <- stats::make.link(link)
+    linktemp <- link
+  }
   linkinv <- function(eta, phi = NULL) {
     s1 <- eta
     if (is.null(phi)) phi <- .phi
@@ -263,8 +315,10 @@ truncated_nbinom1 <- function(link = "log") {
   okLinks <- c("log")
   if (linktemp %in% okLinks)
     stats <- stats::make.link(linktemp)
-  else if (is.character(link))
+  else if (is.character(link)) {
     stats <- stats::make.link(link)
+    linktemp <- link
+  }
   linkinv <- function(eta, phi = NULL) {
     mu <- exp(eta)
     if (is.null(phi)) phi <- .phi
@@ -276,22 +330,34 @@ truncated_nbinom1 <- function(link = "log") {
     linkinv = linkinv), class = "family")
 }
 
-#' @param df Student-t degrees of freedom fixed value parameter.
+#' @param df Student-t degrees of freedom parameter. Can be `NULL` to estimate (default)
+#'   or a numeric value > 1 to fix at a specific value.
 #' @export
 #' @details
-#' For `student()`, the degrees of freedom parameter is currently not estimated and is fixed at `df`.
+#' For `student()`, the degrees of freedom parameter is estimated by default (`df = NULL`).
+#' You can fix it at a specific value by providing a number > 1 (e.g., `df = 3`).
 #' @rdname families
 #' @examples
-#' student(link = "identity")
-student <- function(link = "identity", df = 3) {
+#' student(link = "identity") # estimate df
+#' student(link = "identity", df = 3) # fix df at 3
+student <- function(link = "identity", df = NULL) {
   linktemp <- substitute(link)
   if (!is.character(linktemp))
     linktemp <- deparse(linktemp)
   okLinks <- c("identity", "log", "inverse")
   if (linktemp %in% okLinks)
     stats <- stats::make.link(linktemp)
-  else if (is.character(link))
+  else if (is.character(link)) {
     stats <- stats::make.link(link)
+    linktemp <- link
+  }
+
+  # Inform user about df parameter
+  if (is.null(df)) {
+    cli::cli_inform("Student-t degrees of freedom parameter will be estimated. This used to be fixed at 3 by default. To fix it, supply a value to `df` (e.g., `df = 3`).")
+  } else {
+    cli::cli_inform("Student-t degrees of freedom parameter fixed at {df}. To estimate it, set `df = NULL`.")
+  }
 
   x <- c(list(family = "student", link = linktemp, df = df), stats)
   add_to_family(x)
@@ -308,8 +374,10 @@ tweedie <- function(link = "log") {
   okLinks <- c("log", "identity")
   if (linktemp %in% okLinks)
     stats <- stats::make.link(linktemp)
-  else if (is.character(link))
+  else if (is.character(link)) {
     stats <- stats::make.link(link)
+    linktemp <- link
+  }
 
   x <- c(list(family = "tweedie", link = linktemp), stats)
   add_to_family(x)
@@ -326,8 +394,10 @@ censored_poisson <- function(link = "log") {
   okLinks <- c("log")
   if (linktemp %in% okLinks)
     stats <- stats::make.link(linktemp)
-  else if (is.character(link))
+  else if (is.character(link)) {
     stats <- stats::make.link(link)
+    linktemp <- link
+  }
 
   structure(list(family = "censored_poisson", link = linktemp, linkfun = stats$linkfun,
     linkinv = stats$linkinv), class = "family")
@@ -350,6 +420,7 @@ censored_poisson <- function(link = "log") {
 #' biomass sampling data, and a computationally efficient alternative. Canadian
 #' Journal of Fisheries and Aquatic Sciences, 75(9), 1369-1382.
 #' \doi{10.1139/cjfas-2017-0266}
+
 delta_gamma <- function(link1,
   link2 = "log", type = c("standard", "poisson-link")) {
   type <- match.arg(type)
@@ -372,15 +443,18 @@ delta_gamma <- function(link1,
     clean_name = clean_name), class = "family")
 }
 
+#' @param p_extreme Optional fixed probability for the extreme component. If NULL (default),
+#'   this is estimated. If specified, must be a proportion between 0 and 1.
 #' @export
 #' @examples
 #' delta_gamma_mix()
 #' @rdname families
-delta_gamma_mix <- function(link1 = "logit", link2 = "log") {
+delta_gamma_mix <- function(link1 = "logit", link2 = "log", p_extreme = NULL) {
   f1 <- binomial(link = link1)
   f2 <- gamma_mix(link = link2)
   structure(list(f1, f2, delta = TRUE, link = c("logit", "log"),
        family = c("binomial", "gamma_mix"),
+       p_extreme = p_extreme,
        clean_name = "delta_gamma_mix(link1 = 'logit', link2 = 'log')"), class = "family")
 }
 
@@ -436,11 +510,13 @@ delta_lognormal <- function(link1,
     clean_name = clean_name), class = "family")
 }
 
+#' @param p_extreme Optional fixed probability for the extreme component. If NULL (default),
+#'   this is estimated. If specified, must be a proportion between 0 and 1.
 #' @export
 #' @examples
 #' delta_lognormal_mix()
 #' @rdname families
-delta_lognormal_mix <- function(link1, link2 = "log", type = c("standard", "poisson-link")) {
+delta_lognormal_mix <- function(link1, link2 = "log", type = c("standard", "poisson-link"), p_extreme = NULL) {
   type <- match.arg(type)
   if (missing(link1)) link1 <- if (type == "standard") "logit" else "log"
   l1 <- substitute(link1)
@@ -458,6 +534,7 @@ delta_lognormal_mix <- function(link1, link2 = "log", type = c("standard", "pois
   }
   structure(list(f1, f2, delta = TRUE, link = c(l1, l2),
        family = c("binomial", "lognormal_mix"), type = .type,
+       p_extreme = p_extreme,
        clean_name = clean_name), class = "family")
 }
 
@@ -504,6 +581,32 @@ delta_poisson_link_lognormal <- function(link1 = "log", link2 = "log") {
   lifecycle::deprecate_warn("0.4.2.9000", "delta_poisson_link_lognormal()", "delta_lognormal(type)")
   delta_lognormal(link1 = "logit", link2 = "log", type = "poisson-link")
 }
+
+#' @export
+#' @examples
+#' betabinomial(link = "logit")
+#' @rdname families
+betabinomial <- function(link = "logit") {
+  linktemp <- substitute(link)
+  if (!is.character(linktemp))
+    linktemp <- deparse(linktemp)
+  okLinks <- c("logit", "cloglog")
+  if (linktemp %in% okLinks)
+    stats <- stats::make.link(linktemp)
+  else if (is.character(link)) {
+    if (link %in% okLinks) {
+      stats <- stats::make.link(link)
+      linktemp <- link
+    } else {
+      stop(paste("link", link, "not available for betabinomial family; available links are", paste(okLinks, collapse = ", ")))
+    }
+  } else {
+    stop(paste("link", linktemp, "not available for betabinomial family; available links are", paste(okLinks, collapse = ", ")))
+  }
+  x <- c(list(family = "betabinomial", link = linktemp), stats)
+  add_to_family(x)
+}
+
 
 #' @export
 #' @examples

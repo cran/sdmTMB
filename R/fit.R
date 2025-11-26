@@ -4,8 +4,12 @@ NULL
 #' Fit a spatial or spatiotemporal GLMM with TMB
 #'
 #' Fit a spatial or spatiotemporal generalized linear mixed effects model (GLMM)
-#' with the TMB (Template Model Builder) R package and the SPDE (stochastic
-#' partial differential equation) approximation to Gaussian random fields.
+#' with the TMB (Template Model Builder) R package. Spatial and spatiotemporal
+#' random fields are approximated using the SPDE (stochastic partial differential
+#' equation) approach, which allows for efficient modeling of data that are
+#' correlated in space and/or time. See the [model description
+#' vignette](https://sdmTMB.github.io/sdmTMB/articles/model-description.html) for
+#' details.
 #'
 #' @param formula Model formula. IID random intercepts and slopes are possible using
 #'   \pkg{lme4} syntax, e.g., `+ (1 | g)` or `+ (0 + depth | g)` or `+ (1 + depth | g)` where `g` is a column of class
@@ -20,6 +24,7 @@ NULL
 #'   downstream, supply the time argument.
 #' @param family The family and link. Supports [gaussian()], [Gamma()],
 #'   [binomial()], [poisson()], \code{\link[sdmTMB:families]{Beta()}},
+#'   \code{\link[sdmTMB:families]{betabinomial()}},
 #'   \code{\link[sdmTMB:families]{nbinom2()}},
 #'   \code{\link[sdmTMB:families]{truncated_nbinom2()}},
 #'   \code{\link[sdmTMB:families]{nbinom1()}},
@@ -30,14 +35,16 @@ NULL
 #'   \code{\link[sdmTMB:families]{student()}},
 #'   \code{\link[sdmTMB:families]{tweedie()}}, and
 #'   \code{\link[sdmTMB:families]{gengamma()}}.
-#'   Supports the delta/hurdle models:
+#'   Delta/hurdle models (for zero-inflated data) include:
 #'   \code{\link[sdmTMB:families]{delta_beta()}},
 #'   \code{\link[sdmTMB:families]{delta_gamma()}},
 #'   \code{\link[sdmTMB:families]{delta_gamma_mix()}},
 #'   \code{\link[sdmTMB:families]{delta_lognormal_mix()}},
 #'   \code{\link[sdmTMB:families]{delta_lognormal()}}, and
-#'   \code{\link[sdmTMB:families]{delta_truncated_nbinom2()}},
-#'   For binomial family options, see 'Binomial families' in the Details
+#'   \code{\link[sdmTMB:families]{delta_truncated_nbinom2()}}.
+#'   See the [delta-model
+#'   vignette](https://sdmTMB.github.io/sdmTMB/articles/delta-models.html) for
+#'   details. For binomial family options, see 'Binomial families' in the Details
 #'   section below.
 #' @param spatial Estimate spatial random fields? Options are `'on'` / `'off'`
 #'   or `TRUE` / `FALSE`. Optionally, a list for delta models, e.g. `list('on',
@@ -46,15 +53,15 @@ NULL
 #'   (independent and identically distributed; default), stationary `'ar1'`
 #'   (first-order autoregressive), a random walk (`'rw'`), or fixed at 0
 #'   `'off'`. Will be set to `'off'` if `time = NULL`. If a delta model, can be
-#'   a list. E.g., `list('off', 'ar1')`. Note that the spatiotemporal standard
-#'   deviation represents the marginal steady-state standard deviation of the
-#'   process in the case of the AR1. I.e., it is scaled according to the
-#'   correlation. See the [TMB
-#'   documentation](https://kaskr.github.io/adcomp/classdensity_1_1AR1__t.html).
-#'   If the AR1 correlation coefficient (rho) is estimated close to 1,
-#'   say > 0.99, then you may wish to switch to the random walk `'rw'`.
-#'   Capitalization is ignored. `TRUE` gets converted to `'iid'` and `FALSE`
-#'   gets converted to `'off'`.
+#'   a list. E.g., `list('off', 'ar1')`. Guidance: Use `'iid'` if temporal
+#'   correlation is negligible or already accounted for in fixed effects; `'ar1'`
+#'   if correlation between consecutive time steps decays gradually; `'rw'` if
+#'   changes between time steps are cumulative (each step builds on the last). If
+#'   the AR1 correlation coefficient (rho) is estimated close to 1 (say > 0.99),
+#'   consider switching to `'rw'`. See the [model description
+#'   vignette](https://sdmTMB.github.io/sdmTMB/articles/model-description.html) for
+#'   mathematical details. Capitalization is ignored. `TRUE` gets converted to
+#'   `'iid'` and `FALSE` gets converted to `'off'`.
 #' @param share_range Logical: estimate a shared spatial and spatiotemporal
 #'   range parameter (`TRUE`, default) or independent range parameters
 #'   (`FALSE`). If a delta model, can be a list. E.g., `list(TRUE, FALSE)`.
@@ -64,31 +71,30 @@ NULL
 #'   for warnings about modelling the first time step. Structure shared in
 #'   delta models.
 #' @param time_varying_type Type of time-varying process to apply to
-#'   `time_varying` formula. `'rw'` indicates a random walk with the first
-#'   time step estimated independently (included for legacy reasons), `'rw0'`
-#'   indicates a random walk with the first time step estimated with
-#'   a mean-zero normal prior, `'ar1'` indicates a [stationary first-order
-#'   autoregressive process](https://kaskr.github.io/adcomp/classdensity_1_1AR1__t.html)
-#'   with the first time step estimated with a mean-zero prior. In the case of
-#'   `'rw'`, be careful not to include covariates (including the intercept) in
-#'   both the main and time-varying formula since the first time step is
-#'   estimated independently. I.e., in this case, at least one should have `~
-#'   0` or `~ -1`. Structure shared in delta models.
+#'   `time_varying` formula. Options: `'rw'` (random walk, default), `'rw0'`
+#'   (random walk with mean-zero prior on first time step), or `'ar1'`
+#'   (autoregressive, for coefficients that fluctuate around a mean). For `'rw0'`
+#'   and `'ar1'`, the coefficient starts at zero in the first time step. For
+#'   `'rw'` (default), the first time step is estimated separately—in this case,
+#'   avoid including the same covariates in both `formula` and `time_varying` to
+#'   prevent non-identifiability (use `~ 0` or `~ -1` in at least one). Structure
+#'   shared in delta models.
 #' @param spatial_varying An optional one-sided formula of coefficients that
-#'   should vary in space as random fields. Note that you likely want to include
-#'   a fixed effect for the same variable to improve interpretability since the
-#'   random field is assumed to have a mean of 0. If a (scaled) time column is
-#'   used, it will represent a local-time-trend model. See
+#'   should vary in space as random fields. Allows the effect of a covariate to
+#'   differ spatially. You likely want to include the same variable as a fixed
+#'   effect in `formula` to estimate the average effect—the spatial field then
+#'   represents deviations from that average (since it has mean zero). For example,
+#'   use `formula = y ~ depth` and `spatial_varying = ~ 0 + depth` to model an
+#'   average depth effect plus spatially varying deviations. If a (scaled) time
+#'   column is used, this creates a local-time-trend model. See
 #'   \doi{10.1111/ecog.05176} and the [spatial trends
-#'   vignette](https://pbs-assess.github.io/sdmTMB/articles/spatial-trend-models.html).
-#'   Note this predictor should usually be centered to have mean zero and have a
-#'   standard deviation of approximately 1.
-#'   **The spatial intercept is controlled by the `spatial` argument**; therefore,
-#'   include or exclude the spatial intercept by setting `spatial = 'on'` or
-#'   `'off'`. The only time when it matters whether `spatial_varying` excludes
-#'   an intercept is in the case of factor predictors. In this case, if
-#'   `spatial_varying` excludes the intercept (`~ 0` or `~ -1`), you should set
-#'   `spatial = 'off'` to match.  Structure must be shared in delta models.
+#'   vignette](https://sdmTMB.github.io/sdmTMB/articles/spatial-trend-models.html).
+#'   Predictors should usually be centered to have mean zero and standard deviation
+#'   approximately 1. **The spatial intercept is controlled by the `spatial`
+#'   argument**; set `spatial = 'on'` or `'off'` to include or exclude it. For
+#'   factor predictors, if `spatial_varying` excludes the intercept (`~ 0` or `~
+#'   -1`), set `spatial = 'off'` to match. Structure must be shared in delta
+#'   models.
 #' @param weights A numeric vector representing optional likelihood weights for
 #'   the conditional model. Implemented as in \pkg{glmmTMB}: weights do not have
 #'   to sum to one and are not internally modified. Can also be used for trials
@@ -102,8 +108,12 @@ NULL
 #'   interpolation or forecasting with the predict function. See the Details
 #'   section below.
 #' @param reml Logical: use REML (restricted maximum likelihood) estimation
-#'   rather than maximum likelihood? Internally, this adds the fixed effects to
-#'   the list of random effects to integrate over.
+#'   rather than maximum likelihood? REML accounts for uncertainty in estimating
+#'   fixed effects and can reduce bias in variance parameter estimates, but
+#'   prevents likelihood-based model comparison (e.g., AIC) between models with
+#'   different fixed effects. Use `TRUE` if your focus is on random effect
+#'   variance parameters; use `FALSE` (default) if comparing models with different
+#'   fixed effects or performing index standardization.
 #' @param silent Silent or include optimization details? Helpful to set to
 #'   `FALSE` for models that take a while to fit.
 #' @param anisotropy Logical: allow for anisotropy (spatial correlation that is
@@ -179,9 +189,13 @@ NULL
 #'
 #' **Model description**
 #'
-#' See the [model description](https://pbs-assess.github.io/sdmTMB/articles/model-description.html)
-#' vignette or the relevant appendix of the preprint on sdmTMB:
-#' \doi{10.1101/2022.03.24.485545}
+#' sdmTMB fits GLMMs with spatial and/or spatiotemporal random fields, which
+#' account for correlation in the data due to spatial proximity, or alternatively,
+#' latent spatial and spatiotemporal effects. Spatial fields represent
+#' consistent spatial patterns, while
+#' spatiotemporal fields represent spatial patterns that vary over time. See the [model
+#' description](https://sdmTMB.github.io/sdmTMB/articles/model-description.html)
+#' vignette for mathematical details and the paper: \doi{10.1101/2022.03.24.485545}
 #'
 #' **Binomial families**
 #'
@@ -219,7 +233,7 @@ NULL
 #' function of the 50% and 95% values. This is similar to length- or size-based
 #' selectivity in fisheries, and is parameterized by the points at which f(x) =
 #' 0.5 or 0.95. See the
-#' [threshold vignette](https://pbs-assess.github.io/sdmTMB/articles/threshold-models.html).
+#' [threshold vignette](https://sdmTMB.github.io/sdmTMB/articles/threshold-models.html).
 #'
 #' Note that only a single threshold covariate can be included and the same covariate
 #' is included in both components for the delta families.
@@ -252,7 +266,7 @@ NULL
 #' or fit the model with `do_fit = FALSE` and inspect
 #' `head(your_model$tmb_data$X_ij[[1]])` if you want to see how the formula is
 #' translated to the fixed effect model matrix. Also see the
-#' [Bayesian vignette](https://pbs-assess.github.io/sdmTMB/articles/bayesian.html).
+#' [Bayesian vignette](https://sdmTMB.github.io/sdmTMB/articles/bayesian.html).
 #'
 #' **Delta/hurdle models**
 #'
@@ -279,23 +293,23 @@ NULL
 #' [get_index()] using the generalized delta method within TMB. Also, selected
 #' parameters can be shared across the models.
 #'
-#' See the [delta-model vignette](https://pbs-assess.github.io/sdmTMB/articles/delta-models.html).
+#' See the [delta-model vignette](https://sdmTMB.github.io/sdmTMB/articles/delta-models.html).
 #'
 #' **Index standardization**
 #'
 #' For index standardization, you may wish to include `0 + as.factor(year)`
 #' (or whatever the time column is called) in the formula. See a basic
 #' example of index standardization in the relevant
-#' [package vignette](https://pbs-assess.github.io/sdmTMB/articles/index-standardization.html).
+#' [package vignette](https://sdmTMB.github.io/sdmTMB/articles/index-standardization.html).
 #' You will need to specify the `time` argument. See [get_index()].
 #'
 #' @references
 #'
 #' **Main reference introducing the package to cite when using sdmTMB:**
 #'
-#' Anderson, S.C., E.J. Ward, P.A. English, L.A.K. Barnett. 2022. sdmTMB: an R
-#' package for fast, flexible, and user-friendly generalized linear mixed effects
-#' models with spatial and spatiotemporal random fields.
+#' Anderson, S.C., E.J. Ward, P.A. English, L.A.K. Barnett, J.T. Thorson. 2024.
+#' sdmTMB: an R package for fast, flexible, and user-friendly generalized linear
+#' mixed effects models with spatial and spatiotemporal random fields.
 #' bioRxiv 2022.03.24.485545; \doi{10.1101/2022.03.24.485545}.
 #'
 #' *Reference for local trends:*
@@ -687,18 +701,21 @@ sdmTMB <- function(
   quadratic_roots <- control$quadratic_roots
   start <- control$start
   multiphase <- control$multiphase
+  getsd <- control$getsd
   map <- control$map
   lower <- control$lower
   upper <- control$upper
   get_joint_precision <- control$get_joint_precision
   upr <- control$censored_upper
   suppress_nlminb_warnings <- control$suppress_nlminb_warnings
+  collapse_spatial_variance <- control$collapse_spatial_variance
+  collapse_threshold <- control$collapse_threshold
 
   dot_checks <- c(
-    "lower", "upper", "profile", "parallel", "censored_upper",
+    "lower", "upper", "profile", "parallel", "censored_upper", "getsd",
     "nlminb_loops", "newton_steps", "mgcv", "quadratic_roots", "multiphase",
     "newton_loops", "start", "map", "get_joint_precision", "normalize",
-    "suppress_nlminb_warnings"
+    "suppress_nlminb_warnings", "collapse_spatial_variance", "collapse_threshold"
   )
   .control <- control
   # FIXME; automate this from sdmTMcontrol args?
@@ -738,7 +755,7 @@ sdmTMB <- function(
       x <- unlist(lapply(list(formula), \(x) attr(stats::terms(x), "term.labels")))
       xf <- x[grep("factor\\(", x)]
       if (any(c(grep(time, xf), grep(paste0("^", time, "$"), x)))) {
-        cli::cli_warn("Detected potential formula-time column clash. E.g., assuming 'year' is your time column: `formula = ... + factor(year)` combined with `time = 'year'`, and 'extra_time' specified. This can produce a non-identiable model because extra factor levels for the missing time slices will be created. To avoid this, rename your factor time column used in your formula. E.g. create a new column 'year_factor' in your data and use that in the formula. See issue https://github.com/pbs-assess/sdmTMB/issues/320.")
+        cli::cli_warn("Detected potential formula-time column clash. E.g., assuming 'year' is your time column: `formula = ... + factor(year)` combined with `time = 'year'`, and 'extra_time' specified. This can produce a non-identiable model because extra factor levels for the missing time slices will be created. To avoid this, rename your factor time column used in your formula. E.g. create a new column 'year_factor' in your data and use that in the formula. See issue https://github.com/sdmTMB/sdmTMB/issues/320.")
       }
     }
   }
@@ -953,9 +970,13 @@ sdmTMB <- function(
   # (yobs, weights) could be (proportions, size)
   # On the C++ side 'yobs' must be the number of successes.
   size <- rep(1, nrow(X_ij[[1]])) # for non-binomial case TODO: change hard coded index
-  if (identical(family$family[1], "binomial") && !delta) {
+
+  # Helper function for binomial-type response processing
+  process_binomial_response <- function(mf, weights) {
     ## call this to catch the factor / matrix cases
     y_i <- model.response(mf[[1]], type = "any")
+    size <- rep(1, length(y_i))
+
     ## allow character
     if (is.character(y_i)) {
       y_i <- model.response(mf[[1]], type = "factor")
@@ -967,7 +988,7 @@ sdmTMB <- function(
       if (nlevels(y_i) > 2) {
         cli_abort("More than 2 levels detected for response")
       }
-      ## following glm, ‘success’ is interpreted as the factor not
+      ## following glm, 'success' is interpreted as the factor not
       ## having the first level (and hence usually of having the
       ## second level).
       y_i <- pmin(as.numeric(y_i) - 1, 1)
@@ -986,7 +1007,7 @@ sdmTMB <- function(
           weights <- rep(1, length(y_i))
         }
       }
-    } # https://github.com/pbs-assess/sdmTMB/issues/172
+    } # https://github.com/sdmTMB/sdmTMB/issues/172
     if (is.logical(y_i)) {
       msg <- paste0(
         "We recommend against using `TRUE`/`FALSE` ",
@@ -995,6 +1016,15 @@ sdmTMB <- function(
       )
       cli_warn(msg)
     }
+
+    list(y_i = y_i, size = size, weights = weights)
+  }
+
+  if ((identical(family$family[1], "binomial") || identical(family$family[1], "betabinomial")) && !delta) {
+    result <- process_binomial_response(mf, weights)
+    y_i <- result$y_i
+    size <- result$size
+    weights <- result$weights
   }
 
   if (identical(family$link[1], "log") && min(y_i, na.rm = TRUE) < 0 && !delta) {
@@ -1022,7 +1052,13 @@ sdmTMB <- function(
     anisotropy <- FALSE
   }
 
-  df <- if (family$family[1] == "student" && "df" %in% names(family)) family$df else 3
+  # Student-t df: can be NULL (estimate, default) or numeric (fix)
+  student_df_fixed <- if (family$family[1] == "student" && "df" %in% names(family)) {
+    family$df
+  } else {
+    NULL
+  }
+  estimate_student_df <- family$family[1] == "student" && is.null(student_df_fixed)
 
   est_epsilon_model <- 0L
   epsilon_covariate <- rep(0, length(unique(data[[time]])))
@@ -1142,6 +1178,7 @@ sdmTMB <- function(
     b_smooth_start = sm$b_smooth_start,
     proj_lon = 0,
     proj_lat = 0,
+    proj_vector = 0,
     do_predict = 0L,
     calc_se = 0L,
     pop_pred = 0L,
@@ -1153,6 +1190,7 @@ sdmTMB <- function(
     calc_index_totals = 0L,
     calc_cog = 0L,
     calc_eao = 0L,
+    calc_weighted_avg = 0L,
     random_walk = random_walk,
     ar1_time = as.integer(!is.null(time_varying) && time_varying_type == "ar1"),
     priors_b_n = length(not_na),
@@ -1181,7 +1219,6 @@ sdmTMB <- function(
     family = .valid_family[family$family],
     size = c(size),
     link = .valid_link[family$link],
-    df = df,
     spatial_only = as.integer(spatial_only),
     spatial_covariate = as.integer(!is.null(spatial_varying)),
     calc_quadratic_range = as.integer(quadratic_roots),
@@ -1222,8 +1259,13 @@ sdmTMB <- function(
     ln_kappa = matrix(0, 2L, n_m),
     # ln_kappa   = rep(log(sqrt(8) / median(stats::dist(spde$mesh$loc))), 2),
     thetaf = 0,
+    ln_student_df = if (family$family[1] == "student") {
+      if (estimate_student_df) log(2) else log(student_df_fixed - 1)
+    } else {
+      0  # default for non-student families
+    },
     gengamma_Q = 0.5, # Not defined at exactly 0
-    logit_p_mix = 0,
+    logit_p_extreme = 0,
     log_ratio_mix = -1, # ratio is 1 + exp(log_ratio_mix) so 0 would start fairly high
     ln_phi = rep(0, n_m),
     ln_tau_V = matrix(0, ncol(X_rw_ik), n_m),
@@ -1254,6 +1296,15 @@ sdmTMB <- function(
   tmb_map$b_j <- NULL
   if (delta) tmb_map$b_j2 <- NULL
   if (family$family[[1]] == "tweedie") tmb_map$thetaf <- NULL
+  if (family$family[[1]] == "student") {
+    if (estimate_student_df) {
+      tmb_map$ln_student_df <- NULL  # estimate
+    } else {
+      tmb_map$ln_student_df <- factor(NA)  # fix at initial value
+    }
+  } else {
+    tmb_map$ln_student_df <- factor(NA)  # not student family, fix at 0
+  }
   if ("gengamma" %in% family$family) tmb_map$gengamma_Q <- factor(NA)
   tmb_map$ln_phi <- rep(1, n_m)
   if (family$family[[1]] %in% c("binomial", "poisson", "censored_poisson")) {
@@ -1441,14 +1492,35 @@ sdmTMB <- function(
     tmb_map$ln_H_input <- factor(c(1, 2, 1, 2)) # share anisotropy as in VAST
   }
 
+  # Handle mixture models
   if (family$family[[1]] %in% c("gamma_mix", "lognormal_mix", "nbinom2_mix")) {
-    tmb_map$log_ratio_mix <- NULL # performs better starting this in 2nd phase
-    tmb_map$logit_p_mix <- NULL # performs better starting this in 2nd phase
+    fixed_p_extreme <- family$p_extreme
+
+    if (!is.null(fixed_p_extreme)) {
+      # Fix logit_p_extreme at the user-specified value
+      tmb_map$logit_p_extreme <- factor(NA)
+      tmb_params$logit_p_extreme <- log(fixed_p_extreme/(1-fixed_p_extreme))
+      tmb_map$log_ratio_mix <- NULL
+    } else {
+      tmb_map$log_ratio_mix <- NULL
+      tmb_map$logit_p_extreme <- NULL
+    }
   }
+  # delta mixture models
   if (delta) {
     if (family$family[[2]] %in% c("gamma_mix", "lognormal_mix", "nbinom2_mix")) {
-      tmb_map$log_ratio_mix <- NULL
-      tmb_map$logit_p_mix <- NULL
+      fixed_p_extreme <- family[[2]]$p_extreme
+      if (is.null(fixed_p_extreme)) fixed_p_extreme <- family$p_extreme
+
+      if (!is.null(fixed_p_extreme)) {
+        # Fix logit_p_extreme at the user-specified value
+        tmb_map$logit_p_extreme <- factor(NA)
+        tmb_params$logit_p_extreme <- log(fixed_p_extreme/(1-fixed_p_extreme))
+        tmb_map$log_ratio_mix <- NULL
+      } else {
+        tmb_map$log_ratio_mix <- NULL
+        tmb_map$logit_p_extreme <- NULL
+      }
     }
   }
 
@@ -1610,14 +1682,57 @@ sdmTMB <- function(
     }
   }
 
-  tmb_opt <- run_newton_loops(newton_loops = newton_loops, tmb_opt, tmb_obj, silent)
   check_bounds(tmb_opt$par, lim$lower, lim$upper)
 
-  if (!silent) cli_inform("running TMB sdreport\n")
-  sd_report <- TMB::sdreport(tmb_obj, getJointPrecision = get_joint_precision)
-  conv <- get_convergence_diagnostics(sd_report)
+  # Check if spatial/spatiotemporal variances are collapsing to zero
+  # Do this before Newton steps to avoid Hessian issues if variances have collapsed
+  if (collapse_spatial_variance && length(tmb_obj$par) > 0) {
+    report_vals <- tmb_obj$report()
+    collapse_result <- check_and_collapse_random_fields(
+      tmb_obj = tmb_obj,
+      report_vals = report_vals,
+      spatial = spatial,
+      spatiotemporal = spatiotemporal,
+      n_m = n_m,
+      n_t = n_t,
+      omit_spatial_intercept = omit_spatial_intercept,
+      collapse_threshold = collapse_threshold,
+      delta = delta,
+      silent = silent
+    )
+    if (collapse_result$do_refit) {
+      if (!silent) {
+        cli_inform(c(
+          "i" = "Refitting model with collapsed random field(s) using update()..."
+        ))
+      }
 
-  ## save params that families need to grab from environments:
+      # Now refit with collapsed fields disabled
+      # The rest of this sdmTMB() function call was just executed with update()
+      updated_fit <- update(
+        out_structure,
+        spatial = collapse_result$spatial_arg,
+        spatiotemporal = collapse_result$spatiotemporal_arg,
+        do_fit = TRUE,
+        silent = silent
+      )
+      return(updated_fit)
+    }
+  }
+
+  # We only end up here if no collapse was detected
+  tmb_opt <- run_newton_loops(newton_loops = newton_loops, tmb_opt, tmb_obj, silent)
+
+  if (!silent && getsd) cli_inform("running TMB sdreport\n")
+  if (getsd) {
+    sd_report <- TMB::sdreport(tmb_obj, getJointPrecision = get_joint_precision)
+    conv <- get_convergence_diagnostics(sd_report)
+  } else {
+    sd_report <- NULL
+    conv <- NULL
+  }
+
+  # save params that families need to grab from environments:
   if (any(family$family %in% c("truncated_nbinom1", "truncated_nbinom2"))) {
     phi <- exp(tmb_obj$par[["ln_phi"]])
     if (delta) {
@@ -1664,6 +1779,94 @@ check_bounds <- function(.par, lower, upper) {
       }
     }
   }
+}
+
+check_and_collapse_random_fields <- function(
+    tmb_obj,
+    report_vals,
+    spatial,
+    spatiotemporal,
+    n_m,
+    n_t,
+    omit_spatial_intercept,
+    collapse_threshold,
+    delta,
+    silent) {
+
+  do_refit <- FALSE
+  spatial_updated <- spatial
+  spatiotemporal_updated <- spatiotemporal
+
+  # Check spatial field
+  if (any(spatial == "on") && !omit_spatial_intercept) {
+    est_sigma_O <- report_vals$sigma_O
+
+    if (length(est_sigma_O) > 0 && any(est_sigma_O < collapse_threshold)) {
+      which_sigma <- which(est_sigma_O < collapse_threshold)
+
+      if (!silent) {
+        cli_inform(c(
+          "!" = "Spatial variance below threshold ({collapse_threshold}) detected",
+          "i" = "Affected model(s): {paste(which_sigma, collapse = ', ')}",
+          ">" = "Refitting with spatial field(s) disabled"
+        ))
+      }
+
+      for (i in which_sigma) {
+        spatial_updated[i] <- "off"
+      }
+      do_refit <- TRUE
+    }
+  }
+
+  # Check spatiotemporal field (epsilon_st)
+  if (!all(spatiotemporal == "off")) {
+    est_sigma_E <- report_vals$sigma_E
+
+    if (length(est_sigma_E) > 0) {
+      est_sigma_E_by_model <- numeric(n_m)
+
+      for (m in seq_len(n_m)) {
+        idx_start <- (m - 1) * n_t + 1
+        idx_end <- m * n_t
+        if (idx_end <= length(est_sigma_E)) {
+          est_sigma_E_by_model[m] <- min(est_sigma_E[idx_start:idx_end])
+        }
+      }
+
+      if (any(est_sigma_E_by_model < collapse_threshold, na.rm = TRUE)) {
+        which_sigma <- which(est_sigma_E_by_model < collapse_threshold)
+
+        if (!silent) {
+          cli_inform(c(
+            "!" = "Spatiotemporal variance below threshold ({collapse_threshold}) detected",
+            "i" = "Affected model(s): {paste(which_sigma, collapse = ', ')}",
+            ">" = "Refitting with spatiotemporal field(s) disabled"
+          ))
+        }
+
+        for (m in which_sigma) {
+          spatiotemporal_updated[m] <- "off"
+        }
+        do_refit <- TRUE
+      }
+    }
+  }
+
+  # Prepare spatial/spatiotemporal arguments for update()
+  if (delta) {
+    spatial_arg <- as.list(spatial_updated)
+    spatiotemporal_arg <- as.list(spatiotemporal_updated)
+  } else {
+    spatial_arg <- spatial_updated[1]
+    spatiotemporal_arg <- spatiotemporal_updated[1]
+  }
+
+  list(
+    do_refit = do_refit,
+    spatial_arg = spatial_arg,
+    spatiotemporal_arg = spatiotemporal_arg
+  )
 }
 
 set_limits <- function(tmb_obj, lower, upper, loc = NULL, silent = TRUE) {

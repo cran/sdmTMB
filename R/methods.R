@@ -68,16 +68,35 @@ coef.sdmTMB <- function(object, complete = FALSE, model = 1, ...) {
 #'
 #' @param object The fitted sdmTMB model object
 #' @param complete Currently ignored
+#' @param model Linear predictor for delta models. Defaults to the first
+#'   linear predictor.
 #' @param ... Currently ignored
 #' @importFrom stats vcov
 #' @export
 #' @noRd
-vcov.sdmTMB <- function(object, complete = FALSE, ...) {
+vcov.sdmTMB <- function(object, complete = FALSE, model = 1, ...) {
+  if (is_delta(object)) {
+    assert_that(length(model) == 1L)
+    model <- as.integer(model)
+    assert_that(model %in% c(1L, 2L))
+  }
+
   sdr <- object$sd_report
   v <- sdr$cov.fixed
-  fe <- tidy(object)$term
+  fe <- tidy(object, model = model, silent = TRUE)$term
   nm <- colnames(v)
-  i <- grepl("^b_j$", nm)
+
+  # For delta models, identify which b_j to use
+  if (is_delta(object)) {
+    if (model == 1L) {
+      i <- grepl("^b_j$", nm)
+    } else {
+      i <- grepl("^b_j2$", nm)
+    }
+  } else {
+    i <- grepl("^b_j$", nm)
+  }
+
   if (sum(i)) {
     if (sum(i) == length(fe)) { # should always be true
       nm[i] <- fe
@@ -165,8 +184,8 @@ family.sdmTMB <- function (object, ...) {
 #' @importFrom nlme fixef
 #' @method fixef sdmTMB
 #' @export
-fixef.sdmTMB <- function(object, ...) {
-  .t <- tidy(object, silent = TRUE)
+fixef.sdmTMB <- function(object, model = 1, ...) {
+  .t <- tidy(object, model = model, silent = TRUE)
   bhat <- .t$estimate
   names(bhat) <- .t$term
   bhat
@@ -178,13 +197,19 @@ fixef.sdmTMB <- function(object, ...) {
 ranef.sdmTMB <- function(object, ...) {
   .t <- tidy(object, "ran_vals", conf.int = FALSE, silent = TRUE)
   model_list <- list()
+
+  # For non-delta models, there is no model column
+  if (!"model" %in% names(.t)) {
+    .t$model <- 1
+  }
+
   for (i in seq_len(max(.t$model))) { # loop through models
-    .t <- .t[which(.t$model == i), ]
-    groups <- unique(.t$group_name) # names of groups for this model
+    .t_sub <- .t[which(.t$model == i), ]
+    groups <- unique(.t_sub$group_name) # names of groups for this model
     group_list <- vector("list", length = length(groups)) # create empty named list
     names(group_list) <- groups
     for (j in 1:length(groups)) {
-      sub <- .t[which(.t$group_name == groups[j]), ]
+      sub <- .t_sub[which(.t_sub$group_name == groups[j]), ]
       level_ids <- unique(sub$level_ids)
       sub <- sub[, c("group_name", "term", "estimate")]
       if (nrow(sub) > 0) {
@@ -266,9 +291,37 @@ formula.sdmTMB <- function (x, ...) {
 #' @export
 terms.sdmTMB <- function(x, ...) {
   # DELTA FIXME: hardcoded to model 1!
+  # Get the base terms object (without smoothers)
   class(x) <- "glm" # fake
   out <- stats::terms(x)
-  out[[1]]
+  out <- out[[1]]
+
+  # If model has smoothers, add the underlying variables to term.labels
+  # This ensures ggeffects can properly create prediction grids
+  if (!is.null(x$smoothers) && isTRUE(x$smoothers$has_smooths)) {
+    # Extract variable names from smoother labels
+    # e.g., "s(depth)" -> "depth", "t2(x,y)" -> c("x", "y")
+    smooth_vars <- character(0)
+    for (label in x$smoothers$labels) {
+      # Remove s( or t2( prefix and ) suffix
+      # Handle both single variable smooths like s(x) and multi-variable like t2(x,y)
+      inner <- gsub("^[st]2?\\((.*)\\)$", "\\1", label)
+      # Split by comma for multi-variable smooths
+      vars <- strsplit(inner, ",")[[1]]
+      # Trim whitespace
+      vars <- trimws(vars)
+      smooth_vars <- c(smooth_vars, vars)
+    }
+
+    # Add unique smooth variables to term.labels
+    smooth_vars <- unique(smooth_vars)
+    existing_labels <- attr(out, "term.labels")
+    # Only add variables that aren't already in term.labels
+    new_labels <- setdiff(smooth_vars, existing_labels)
+    attr(out, "term.labels") <- c(existing_labels, new_labels)
+  }
+
+  out
 }
 
 #' Calculate effects
@@ -350,27 +403,28 @@ model.frame.sdmTMB <- function(formula, ...) {
   as.data.frame(formula$data) # no tibbles!
 }
 
-# Update an sdmTMB model
-#
-# This method updates an sdmTMB model with new arguments, automatically
-# handling the mesh object to avoid environment issues when loading
-# models from saved files.
-#
-# @param object An sdmTMB model object
-# @param formula. Optional updated formula
-# @param ... Other arguments to update in the model call
-# @param evaluate If `TRUE` (default), the updated call is evaluated;
-#   if `FALSE`, the call is returned unevaluated
-#
-# @return An updated sdmTMB model object (if `evaluate = TRUE`) or
-#   an unevaluated call (if `evaluate = FALSE`)
-#
-# @examples
-# mesh <- make_mesh(pcod_2011, c("X", "Y"), cutoff = 20)
-# fit <- sdmTMB(density ~ 1, data = pcod_2011, mesh = mesh,
-#   family = tweedie(link = "log"))
-# fit2 <- update(fit, family = delta_gamma())
+#' Update an sdmTMB model
+#'
+#' This method updates an sdmTMB model with new arguments, automatically
+#' handling the mesh object to avoid environment issues when loading
+#' models from saved files.
+#'
+#' @param object An sdmTMB model object
+#' @param formula. Optional updated formula
+#' @param ... Other arguments to update in the model call
+#' @param evaluate If `TRUE` (default), the updated call is evaluated;
+#'   if `FALSE`, the call is returned unevaluated
+#'
+#' @return An updated sdmTMB model object (if `evaluate = TRUE`) or
+#'   an unevaluated call (if `evaluate = FALSE`)
+#'
+#' @examples
+#' mesh <- make_mesh(pcod_2011, c("X", "Y"), cutoff = 20)
+#' fit <- sdmTMB(density ~ 1, data = pcod_2011, mesh = mesh,
+#'   family = tweedie(link = "log"))
+#' fit2 <- update(fit, family = delta_gamma())
 #' @export
+#' @importFrom stats update
 update.sdmTMB <- function(object, formula., ..., evaluate = TRUE) {
   call <- object$call
   new_args <- list(...)
@@ -416,4 +470,66 @@ update.sdmTMB <- function(object, formula., ..., evaluate = TRUE) {
   } else {
     call
   }
+}
+
+#' Extract residual standard deviation or dispersion parameter
+#'
+#' @param object The fitted sdmTMB model object
+#' @param ... Currently ignored
+#' @importFrom stats sigma
+#' @method sigma sdmTMB
+#' @export
+sigma.sdmTMB <- function(object, ...) {
+
+  # Get family
+  fam <- if (is_delta(object)) {
+    # For delta models, use the positive model
+    object$family[[2]]
+  } else {
+    object$family
+  }
+
+  family_name <- fam$family
+
+  # Gaussian/lognormal have dispersion/scale parameter
+  if (family_name %in% c("gaussian", "lognormal")) {
+    # phi = dispersion parameter from TMB report
+    tmb_obj <- object$tmb_obj
+    sdr <- object$sd_report
+
+    phi_idx <- which(names(tmb_obj$env$last.par.best) == "ln_phi")
+    if (length(phi_idx) > 0) {
+      ln_phi <- as.numeric(tmb_obj$env$last.par.best[phi_idx])
+      return(exp(ln_phi))
+    }
+  }
+
+  if (family_name == "Gamma") {
+    # For Gamma, phi is shape, sigma = 1/sqrt(shape)
+    tmb_obj <- object$tmb_obj
+    phi_idx <- which(names(tmb_obj$env$last.par.best) == "ln_phi")
+    if (length(phi_idx) > 0) {
+      ln_phi <- as.numeric(tmb_obj$env$last.par.best[phi_idx])
+      shape <- exp(ln_phi)
+      return(1 / sqrt(shape))
+    }
+  }
+
+  if (family_name %in% c("nbinom1", "nbinom2", "tweedie")) {
+    # For negative binomial, return phi (dispersion parameter)
+    tmb_obj <- object$tmb_obj
+    phi_idx <- which(names(tmb_obj$env$last.par.best) == "ln_phi")
+    if (length(phi_idx) > 0) {
+      ln_phi <- as.numeric(tmb_obj$env$last.par.best[phi_idx])
+      return(exp(ln_phi))
+    }
+  }
+
+  # Poisson, binomial don't have dispersion, return 1 (as in glmmTMB)
+  if (family_name %in% c("poisson", "binomial")) {
+    return(1)
+  }
+
+  cli_warn("sigma() not implemented for family: {family_name}")
+  return(NA_real_)
 }

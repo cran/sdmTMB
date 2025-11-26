@@ -17,6 +17,7 @@ sdmTMB_cv(
   lfo_validations = 5,
   parallel = TRUE,
   use_initial_fit = FALSE,
+  save_models = TRUE,
   future_globals = NULL,
   ...
 )
@@ -29,8 +30,8 @@ sdmTMB_cv(
 \item{mesh_args}{Arguments for \code{\link[=make_mesh]{make_mesh()}}. If supplied, the mesh will be
 reconstructed for each fold.}
 
-\item{mesh}{Output from \code{\link[=make_mesh]{make_mesh()}}. If supplied, the mesh will be constant
-across folds.}
+\item{mesh}{Output from \code{\link[=make_mesh]{make_mesh()}}. If supplied, the same mesh will be
+used for all folds. This is faster and usually what you want.}
 
 \item{time}{The name of the time column. Leave as \code{NULL} if this is only
 spatial data.}
@@ -41,16 +42,17 @@ spatial data.}
 single string, e.g. \code{"fold_id"} representing the name of the variable in
 \code{data}. Ignored if \code{lfo} is TRUE}
 
-\item{lfo}{Whether to implement leave-future-out (LFO) cross validation where
-data are used to predict future folds. \code{time} argument in \code{\link[=sdmTMB]{sdmTMB()}} must
-be specified. See Details section below.}
+\item{lfo}{Logical. Use leave-future-out (LFO) cross validation? If \code{TRUE},
+data from earlier time steps are used to predict future time steps. The
+\code{time} argument must be specified. See Details section below.}
 
-\item{lfo_forecast}{If \code{lfo = TRUE}, number of time steps to forecast. Time
-steps 1, ..., T are used to predict T + \code{lfo_forecast} and the last
-forecasted time step is used for validation. See Details section below.}
+\item{lfo_forecast}{If \code{lfo = TRUE}, number of time steps ahead to forecast.
+For example, \code{lfo_forecast = 1} means fitting to time steps 1 to T and
+validating on T + 1. See Details section below.}
 
 \item{lfo_validations}{If \code{lfo = TRUE}, number of times to step through the
-LFOCV process. Defaults to 5. See Details section below.}
+LFO process (i.e., number of validation folds). Defaults to 5. See Details
+section below.}
 
 \item{parallel}{If \code{TRUE} and a \code{\link[future:plan]{future::plan()}} is supplied, will be run in
 parallel.}
@@ -58,40 +60,47 @@ parallel.}
 \item{use_initial_fit}{Fit the first fold and use those parameter values
 as starting values for subsequent folds? Can be faster with many folds.}
 
+\item{save_models}{Logical. If \code{TRUE} (default), the fitted model object for
+each fold is stored in the output. If \code{FALSE}, models are not saved, which
+can substantially reduce memory usage for large datasets or many folds.
+When \code{FALSE}, functions that require access to the fitted models (e.g.,
+\code{\link[=tidy]{tidy()}}, \code{\link[=cv_to_waywiser]{cv_to_waywiser()}}) will not work.}
+
 \item{future_globals}{A character vector of global variables used within
 arguments if an error is returned that \pkg{future.apply} can't find an
 object. This vector is appended to \code{TRUE} and passed to the argument
 \code{future.globals} in \code{\link[future.apply:future_lapply]{future.apply::future_lapply()}}. Useful if global
 objects are used to specify arguments like priors, families, etc.}
 
-\item{...}{All other arguments required to run \code{\link[=sdmTMB]{sdmTMB()}} model with the
-exception of \code{weights}, which are used to define the folds.}
+\item{...}{All other arguments required to run the \code{\link[=sdmTMB]{sdmTMB()}} model. The
+\code{weights} argument is supported and will be combined with the internal
+fold-assignment mechanism (held-out data are assigned weight 0).}
 }
 \value{
 A list:
 \itemize{
-\item \code{data}: Original data plus columns for fold ID, CV predicted value,
-and CV log likelihood.
-\item \code{models}: A list of models; one per fold.
-\item \code{fold_loglik}: Sum of left-out log likelihoods per fold. More positive
-values are better.
-\item \code{sum_loglik}: Sum of \code{fold_loglik} across all left-out data. More positive
-values are better.
-\item \code{pdHess}: Logical vector: Hessian was invertible each fold?
-\item \code{converged}: Logical: all \code{pdHess} \code{TRUE}?
-\item \code{max_gradients}: Max gradient per fold.
+\item \code{data}: Original data plus columns for fold ID (\code{cv_fold}), CV predicted
+value (\code{cv_predicted}), CV log likelihood (\code{cv_loglik}), and CV deviance
+residuals (\code{cv_deviance_resid}).
+\item \code{models}: A list of fitted models, one per fold. \code{NULL} if \code{save_models = FALSE}.
+\item \code{fold_loglik}: Sum of log likelihoods of held-out data per fold (log
+predictive density per fold). More positive values indicate better
+out-of-sample prediction.
+\item \code{sum_loglik}: Sum of \code{fold_loglik} across all folds (total log predictive
+density). Use this to compare models—more positive values are better.
+\item \code{pdHess}: Logical vector: was the Hessian positive definite for each fold?
+\item \code{converged}: Logical: did all folds converge (all \code{pdHess} \code{TRUE})?
+\item \code{max_gradients}: Maximum absolute gradient for each fold.
 }
-
-Prior to \pkg{sdmTMB} version '0.3.0.9002', \code{elpd} was incorrectly returned as
-the log average likelihood, which is another metric you could compare models
-with, but not ELPD. For maximum likelihood, \href{https://github.com/pbs-assess/sdmTMB/issues/235}{ELPD is equivalent in spirit to the sum of the log likelihoods}.
 }
 \description{
-Facilitates cross validation with sdmTMB models. Returns the log likelihood
-of left-out data, which is similar in spirit to the ELPD (expected log
-pointwise predictive density). The function has an option for
-leave-future-out cross validation. By default, the function creates folds
-randomly but folds can be manually assigned via the \code{fold_ids} argument.
+Performs k-fold or leave-future-out cross validation with sdmTMB models.
+Returns the sum of log likelihoods of held-out data (log predictive density),
+which can be used to compare models—higher values indicate better
+out-of-sample prediction. By default, creates folds randomly and stratified
+by time (set a seed for reproducibility), but folds can be manually assigned
+via \code{fold_ids}. See Ward and Anderson (2025) in the References and the
+\href{https://sdmTMB.github.io/sdmTMB/articles/cross-validation.html}{cross-validation vignette}.
 }
 \details{
 \strong{Parallel processing}
@@ -183,4 +192,9 @@ m_lfocv <- sdmTMB_cv(
 fold_table <- table(m_lfocv$data$cv_fold, m_lfocv$data$year)
 fold_table
 }
+}
+\references{
+Ward, E.J., and S.C. Anderson. 2025. Approximating spatial processes with
+too many knots degrades the quality of probabilistic predictions.
+bioRxiv 2025.11.14.688354. \doi{10.1101/2025.11.14.688354}.
 }

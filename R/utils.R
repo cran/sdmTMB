@@ -15,9 +15,6 @@
 #'   the Hessian at the current MLE with [stats::optimHess()] using a
 #'   finite-difference approach and uses this to update the fixed effect
 #'   estimates.
-#' @param mgcv **Deprecated** Parse the formula with [mgcv::gam()]?
-#' @param map_rf **Deprecated** use `spatial = 'off', spatiotemporal = 'off'` in
-#'   [sdmTMB()].
 #' @param map A named list with factor `NA`s specifying parameter values that
 #'   should be fixed at a constant value. See the documentation in
 #'   [TMB::MakeADFun()]. This should usually be used with `start` to specify the
@@ -33,6 +30,7 @@
 #'   profile for depth, and depth and depth^2 are part of your formula, you need
 #'   to make sure these are listed first and that an intercept isn't included.
 #'   For example, `formula = cpue ~ 0 + depth + depth2 + as.factor(year)`.
+#' @param getsd Logical indicating whether to call [TMB::sdreport()].
 #' @param normalize Logical: use [TMB::normalize()] to normalize the process
 #'   likelihood using the Laplace approximation? Can result in a substantial
 #'   speed boost in some cases. This used to default to `FALSE` prior to
@@ -66,6 +64,20 @@
 #' @param suppress_nlminb_warnings Suppress uninformative warnings
 #'   from [stats::nlminb()] arising when a function evaluation is `NA`, which
 #'   are then replaced with `Inf` and avoided during estimation?
+#' @param collapse_spatial_variance Logical: should spatial and/or spatiotemporal
+#'   random fields be automatically dropped if their estimated standard deviation
+#'   is effectively zero (i.e., below `collapse_threshold`)? This helps prevent
+#'   overfitting and numerical instability when the data provide little evidence
+#'   for spatial or spatiotemporal variation. I.e., when the variance parameter is
+#'   estimated on or near the boundary of zero. When enabled, the model will be
+#'   automatically refitted via [update.sdmTMB()] with the corresponding field(s)
+#'   disabled. This adds a computational cost (a single model refit if
+#'   collapsing occurs) but can yield a simpler, more stable model and more
+#'   reliable inference. Default is `FALSE` for backwards compatibility.
+#' @param collapse_threshold Numeric: the standard deviation threshold below which random
+#'   fields are considered to be collapsing to zero. Only used when
+#'   `collapse_spatial_variance = TRUE`. Values are on the standard deviation
+#'   scale (i.e., square root of variance). Default is 0.01.
 #' @param ... Anything else. See the 'Control parameters' section of
 #'   [stats::nlminb()].
 #'
@@ -85,10 +97,9 @@ sdmTMBcontrol <- function(
   normalize = FALSE,
   nlminb_loops = 1L,
   newton_loops = 1L,
-  mgcv = deprecated(),
+  getsd = TRUE,
   quadratic_roots = FALSE,
   start = NULL,
-  map_rf = deprecated(),
   map = NULL,
   lower = NULL,
   upper = NULL,
@@ -98,16 +109,10 @@ sdmTMBcontrol <- function(
   get_joint_precision = TRUE,
   parallel = getOption("sdmTMB.cores", 1L),
   suppress_nlminb_warnings = TRUE,
+  collapse_spatial_variance = FALSE,
+  collapse_threshold = 0.01,
   ...) {
 
-  if (is_present(mgcv)) {
-    deprecate_stop("0.0.20", "sdmTMBcontrol(mgcv)",
-      details = "`mgcv` argument no longer does anything.")
-  }
-
-  if (is_present(map_rf)) {
-    deprecate_stop("0.0.22", "sdmTMBcontrol(map_rf)", "sdmTMB(spatial = 'off', spatiotemporal = 'off')")
-  }
   assert_that(is.numeric(nlminb_loops), is.numeric(newton_loops))
   assert_that(nlminb_loops >= 1L)
   assert_that(newton_loops >= 0L)
@@ -121,6 +126,8 @@ sdmTMBcontrol <- function(
   }
 
   assert_that(is.logical(profile) || is.character(profile))
+  assert_that(is.logical(collapse_spatial_variance))
+  assert_that(is.numeric(collapse_threshold), collapse_threshold > 0)
 
   out <- named_list(
     eval.max,
@@ -128,6 +135,7 @@ sdmTMBcontrol <- function(
     normalize,
     nlminb_loops,
     newton_loops,
+    getsd,
     profile,
     quadratic_roots,
     start,
@@ -137,7 +145,9 @@ sdmTMBcontrol <- function(
     censored_upper,
     multiphase,
     parallel,
-    get_joint_precision
+    get_joint_precision,
+    collapse_spatial_variance,
+    collapse_threshold
   )
   c(out, list(...))
 }
@@ -552,7 +562,7 @@ get_censored_upper <- function(
 #'
 #' @param x An [sdmTMB::sdmTMB()] model fit with a delta family such as
 #'   [sdmTMB::delta_gamma()].
-#' @param model Which delta/hurdle model component to predict/plot with.
+#' @param model Which delta/hurdle linear predictor to predict/plot with.
 #'   `NA` does the combined prediction, `1` does the binomial part, and `2`
 #'   does the positive part.
 #'
@@ -576,8 +586,8 @@ get_censored_upper <- function(
 #'   ggeffects::ggpredict("depth_scaled [all]")
 #' ```
 #'
-#' But cannot be run on CRAN until a version of \pkg{ggeffects} > 1.3.2
-#' is on CRAN. For now, you can install the GitHub version of \pkg{ggeffects}.
+#' But cannot be run on CRAN until the next version of \pkg{ggeffects} is available
+#' on CRAN. For now, you can install the GitHub version of \pkg{ggeffects}.
 #' <https://github.com/strengejacke/ggeffects>.
 #'
 #' @returns
@@ -662,4 +672,144 @@ reinitialize <- function(x) {
       }
     }
   }
+}
+
+#' Set up spatially varying coefficients for category composition models
+#'
+#' This function helps set up the data structure, formula, and mapping needed
+#' for fitting spatially varying coefficient models with categories (e.g., ages,
+#' length bins, species) that have both spatial and spatiotemporal random
+#' fields. It's particularly useful for age or length composition
+#' standardization models.
+#'
+#' @param data Data frame containing the composition data.
+#' @param category_column Character. Name of the category column (e.g., "Age",
+#'   "length_bin", "species").
+#' @param time_column Character. Name of the time column (e.g., "Year").
+#' @param share_spatial_sd Logical. If `TRUE`, all categories share the same
+#'   spatial SD. If `FALSE`, each category gets its own spatial SD.
+#' @param share_spatiotemporal_sd Logical. If `TRUE`, all category-time
+#'   combinations share the same spatiotemporal SD. If `FALSE`, each gets its
+#'   own.
+#'
+#' @return A list containing:
+#' \itemize{
+#'   \item `data_expanded`: Data frame with added model matrix columns for use in [sdmTMB()].
+#'   \item `svc_formula`: Formula for the `spatial_varying` argument in [sdmTMB()].
+#'   \item `svc_map`: Map list for the `map` argument in [sdmTMBcontrol()].
+#'   \item `info`: List with summary information about the model structure.
+#' }
+#'
+#' @details This function creates spatially varying coefficient structures for
+#' composition models by setting up:
+#'
+#' 1. **Spatial fields**: One field per category (e.g., age-specific spatial
+#' fields) 2. **Spatiotemporal fields**: One field per category-time combination
+#' (e.g., age-year fields)
+#'
+#' The sharing of variance parameters is controlled by `share_spatial_sd` and
+#' `share_spatiotemporal_sd`. When `TRUE`, all fields of that type share the
+#' same variance parameter, which is more parsimonious but assumes similar
+#' variance magnitudes across categories.
+#'
+#' The resulting model structure allows each category to have its own spatial
+#' pattern and temporal variation while controlling parameter sharing for
+#' identifiability and computational efficiency.
+#'
+#' @examples
+#' set.seed(123)
+#' data <- data.frame(
+#'   age = factor(rep(1:3, each = 20)),
+#'   year = rep(2020:2022, 20),
+#'   abundance = rnorm(60),
+#'   x = runif(60), y = runif(60)
+#' )
+#'
+#' # Set up model components
+#' setup <- make_category_svc(
+#'   data = data,
+#'   category_column = "age",
+#'   time_column = "year",
+#'   share_spatial_sd = TRUE,
+#'   share_spatiotemporal_sd = TRUE
+#' )
+#'
+#' # Check the setup
+#' setup$info
+#'
+#' # See the age composition standardization vignette for more details
+#' @export
+make_category_svc <- function(data,
+                               category_column,
+                               time_column,
+                               share_spatial_sd = TRUE,
+                               share_spatiotemporal_sd = TRUE) {
+  # Input validation
+  assert_that(is.data.frame(data))
+  assert_that(is.character(category_column), length(category_column) == 1L)
+  assert_that(is.character(time_column), length(time_column) == 1L)
+  assert_that(is.logical(share_spatial_sd), length(share_spatial_sd) == 1L)
+  assert_that(is.logical(share_spatiotemporal_sd), length(share_spatiotemporal_sd) == 1L)
+
+  if (!category_column %in% names(data)) {
+    cli_abort(paste0("Column '", category_column, "' not found in data."))
+  }
+  if (!time_column %in% names(data)) {
+    cli_abort(paste0("Column '", time_column, "' not found in data."))
+  }
+
+  # Create model matrices
+  spatial_formula <- as.formula(paste0("~ 0 + ", category_column))
+  spatiotemporal_formula <- as.formula(paste0("~ 0 + factor(", time_column, "):", category_column))
+
+  spatial_terms <- model.matrix(spatial_formula, data = data)
+  spatiotemporal_terms <- model.matrix(spatiotemporal_formula, data = data)
+
+  # Combine matrices
+  combined_matrix <- cbind(spatial_terms, spatiotemporal_terms)
+  colnames_combined <- colnames(combined_matrix)
+
+  # Create mapping based on sharing preferences
+  n_spatial <- ncol(spatial_terms)
+  n_spatiotemporal <- ncol(spatiotemporal_terms)
+
+  if (share_spatial_sd && share_spatiotemporal_sd) {
+    # Two shared SDs: one for spatial, one for spatiotemporal
+    svc_map <- factor(c(rep(1, n_spatial), rep(2, n_spatiotemporal)))
+  } else if (share_spatial_sd && !share_spatiotemporal_sd) {
+    # Shared spatial SD, separate spatiotemporal SDs
+    svc_map <- factor(c(rep(1, n_spatial), 2:(n_spatiotemporal + 1)))
+  } else if (!share_spatial_sd && share_spatiotemporal_sd) {
+    # Separate spatial SDs, shared spatiotemporal SD
+    svc_map <- factor(c(1:n_spatial, rep(n_spatial + 1, n_spatiotemporal)))
+  } else {
+    # All separate SDs
+    svc_map <- factor(1:(n_spatial + n_spatiotemporal))
+  }
+
+  # Expand data
+  data_expanded <- cbind(data, combined_matrix)
+
+  # Create formula
+  svc_formula <- as.formula(paste0("~ `", paste(colnames_combined, collapse = "` + `"), "`"))
+
+  # Create info summary
+  info <- list(
+    n_categories = length(unique(data[[category_column]])),
+    n_times = length(unique(data[[time_column]])),
+    n_spatial_terms = n_spatial,
+    n_spatiotemporal_terms = n_spatiotemporal,
+    n_variance_parameters = length(unique(svc_map)),
+    spatial_terms = colnames(spatial_terms),
+    spatiotemporal_terms = colnames(spatiotemporal_terms),
+    share_spatial_sd = share_spatial_sd,
+    share_spatiotemporal_sd = share_spatiotemporal_sd
+  )
+
+  return(list(
+    data_expanded = data_expanded,
+    svc_formula = svc_formula,
+    svc_map = list(ln_tau_Z = svc_map),
+    info = info
+  ))
 }

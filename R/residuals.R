@@ -1,6 +1,7 @@
 qres_tweedie <- function(object, y, mu, ...) {
-  p <- stats::plogis(object$model$par[["thetaf"]]) + 1
-  dispersion <- exp(object$model$par[["ln_phi"]])
+  theta <- get_pars(object)
+  p <- stats::plogis(theta[["thetaf"]]) + 1
+  dispersion <- exp(theta[["ln_phi"]])
 
   u <- fishMod::pTweedie(q = y, p = p, mu = mu, phi = dispersion)
   if (p > 1 && p < 2) {
@@ -20,8 +21,28 @@ qres_binomial <- function(object, y, mu, .n = NULL) {
   stats::qnorm(u)
 }
 
+qres_betabinomial <- function(object, y, mu, .n = NULL) {
+  # Extract dispersion parameter
+  theta <- get_pars(object)
+  phi <- exp(theta[["ln_phi"]])
+  if (is_delta(object)) phi <- phi[2]
+
+  # TMB parameterization: alpha = mu * phi, beta = (1 - mu) * phi
+  # where mu is already on probability scale from linkinv
+  alpha <- mu * phi
+  beta <- (1 - mu) * phi
+
+  if (is.null(.n)) .n <- rep(1, length(y))
+
+  a <- extraDistr::pbbinom(pmax(0, y - 1), size = .n, alpha = alpha, beta = beta)
+  b <- extraDistr::pbbinom(y, size = .n, alpha = alpha, beta = beta)
+  u <- stats::runif(n = length(y), min = pmin(a, b), max = pmax(a, b))
+  stats::qnorm(u)
+}
+
 qres_nbinom2 <- function(object, y, mu, ...) {
-  phi <- exp(object$model$par[["ln_phi"]])
+  theta <- get_pars(object)
+  phi <- exp(theta[["ln_phi"]])
   if (is_delta(object)) phi <- phi[2]
   a <- stats::pnbinom(y - 1, size = phi, mu = mu)
   b <- stats::pnbinom(y, size = phi, mu = mu)
@@ -54,6 +75,39 @@ qres_nbinom1 <- function(object, y, mu, ...) {
   stats::qnorm(u)
 }
 
+ptruncated_nbinom2 <- function(q, mu, phi){
+  p <- (stats::pnbinom(q, size = phi, mu = mu) - stats::pnbinom(0, size = phi, mu = mu))/(1 - stats::pnbinom(0, size = phi, mu = mu))
+}
+ptruncated_nbinom1 <- function(q, mu, phi){
+  p <- (pnbinom1(q, mu, phi) - pnbinom1(0, mu, phi))/(1 - pnbinom1(0, mu, phi))
+}
+
+qres_truncated_nbinom2 <- function(object, y, mu, ...) {
+  theta <- get_pars(object)
+  phi <- exp(theta[["ln_phi"]])
+  if (is_delta(object)) phi <- phi[2]
+  a <- ptruncated_nbinom2(y - 1, mu = mu, phi = phi)
+  b <- ptruncated_nbinom2(y, mu = mu, phi = phi)
+  a[is.na(a)] <- -99
+  b[is.na(b)] <- -99
+  u <- stats::runif(n = length(y), min = a, max = b)
+  u[u == -99] <- NA
+  stats::qnorm(u)
+}
+
+qres_truncated_nbinom1 <- function(object, y, mu, ...) {
+  theta <- get_pars(object)
+  phi <- exp(theta[["ln_phi"]])
+  if (is_delta(object)) phi <- phi[2]
+  a <- ptruncated_nbinom1(y - 1, mu = mu, phi = phi)
+  b <- ptruncated_nbinom1(y, mu = mu, phi = phi)
+  a[is.na(a)] <- -99
+  b[is.na(b)] <- -99
+  u <- stats::runif(n = length(y), min = a, max = b)
+  u[u == -99] <- NA
+  stats::qnorm(u)
+}
+
 qres_pois <- function(object, y, mu, ...) {
   a <- stats::ppois(y - 1, mu)
   b <- stats::ppois(y, mu)
@@ -78,26 +132,26 @@ qres_gamma <- function(object, y, mu, ...) {
 qres_gamma_mix <- function(object, y, mu, ...) {
   cli_abort("Randomized quantile residuals for this family are not implemented yet")
   # theta <- get_pars(object)
-  # p_mix <- plogis(theta[["logit_p_mix"]])
+  # p_extreme <- plogis(theta[["logit_p_extreme"]])
   # phi <- exp(theta[["ln_phi"]])
   # if (is_delta(object)) phi <- phi[2]
   # ratio <- exp(theta[["log_ratio_mix"]])
   # s1 <- phi
   # s2 <- mu / s1
   # s3 <- (ratio * mu) / s1
-  # u <- stats::pgamma(q = y, shape = s1, scale = (1-p_mix)*s2 + p_mix*s3) # this looks wrong
+  # u <- stats::pgamma(q = y, shape = s1, scale = (1-p_extreme)*s2 + p_extreme*s3) # this looks wrong
   # stats::qnorm(u)
 }
 
 qres_nbinom2_mix <- function(object, y, mu, ...) {
   cli_abort("Randomized quantile residuals for this family are not implemented yet")
   theta <- get_pars(object)
-  p_mix <- plogis(theta[["logit_p_mix"]])
+  p_extreme <- plogis(theta[["logit_p_extreme"]])
   phi <- exp(theta[["ln_phi"]])
   if (is_delta(object)) phi <- phi[2]
   ratio <- exp(theta[["log_ratio_mix"]])
-  a <- stats::pnbinom(y - 1, size = phi, mu = (1-p_mix)*mu + p_mix*ratio*mu)
-  b <- stats::pnbinom(y, size = phi, mu = (1-p_mix)*mu + p_mix*ratio*mu)
+  a <- stats::pnbinom(y - 1, size = phi, mu = (1-p_extreme)*mu + p_extreme*ratio*mu)
+  b <- stats::pnbinom(y, size = phi, mu = (1-p_extreme)*mu + p_extreme*ratio*mu)
   u <- stats::runif(n = length(y), min = a, max = b)
   stats::qnorm(u)
 }
@@ -105,11 +159,11 @@ qres_nbinom2_mix <- function(object, y, mu, ...) {
 qres_lognormal_mix <- function(object, y, mu, ...) {
   cli_abort("Randomized quantile residuals for this family are not implemented yet")
   theta <- get_pars(object)
-  p_mix <- plogis(theta[["logit_p_mix"]])
+  p_extreme <- plogis(theta[["logit_p_extreme"]])
   dispersion <- exp(theta[["ln_phi"]])
   if (is_delta(object)) dispersion <- dispersion[2]
   ratio <- exp(theta[["log_ratio_mix"]])
-  u <- stats::plnorm(q = y, meanlog = log((1-p_mix)*mu + p_mix*ratio*mu) - (dispersion^2) / 2, sdlog = dispersion)
+  u <- stats::plnorm(q = y, meanlog = log((1-p_extreme)*mu + p_extreme*ratio*mu) - (dispersion^2) / 2, sdlog = dispersion)
   stats::qnorm(u)
 }
 
@@ -134,7 +188,8 @@ pt_ls <- function(q, df, mu, sigma) stats::pt((q - mu) / sigma, df)
 qres_student <- function(object, y, mu, ...) {
   theta <- get_pars(object)
   dispersion <- exp(theta[["ln_phi"]])
-  u <- pt_ls(q = y, df = object$tmb_data$df, mu = mu, sigma = dispersion)
+  df <- exp(theta[["ln_student_df"]]) + 1
+  u <- pt_ls(q = y, df = df, mu = mu, sigma = dispersion)
   stats::qnorm(u)
 }
 
@@ -181,7 +236,7 @@ qres_gengamma <- function(object, y, mu, ...) {
 #'
 #' See the residual-checking vignette: `browseVignettes("sdmTMB")` or [on the
 #' documentation
-#' site](https://pbs-assess.github.io/sdmTMB/articles/residual-checking.html).
+#' site](https://sdmTMB.github.io/sdmTMB/articles/residual-checking.html).
 #' See notes about types of residuals in 'Details' section below.
 #'
 #' @param object An [sdmTMB()] model.
@@ -189,7 +244,7 @@ qres_gengamma <- function(object, y, mu, ...) {
 #' @param model Which delta/hurdle model component?
 #' @param mcmc_samples A vector of MCMC samples of the linear predictor in link
 #'   space. See the `predict_mle_mcmc()` function in the
-#'   \href{https://github.com/pbs-assess/sdmTMBextra}{sdmTMBextra} package.
+#'   \href{https://github.com/sdmTMB/sdmTMBextra}{sdmTMBextra} package.
 #' @param qres_func A custom quantile residuals function. Function should take
 #'   the arguments `object, y, mu, ...` and return a vector of length
 #'   `length(y)`.
@@ -249,7 +304,7 @@ qres_gengamma <- function(object, y, mu, ...) {
 #' See Waagepetersen (2006) and Thygesen et al. (2017). Residuals are converted
 #' to randomized quantile residuals as described above.
 #'
-#' See the \href{https://github.com/pbs-assess/sdmTMBextra}{\pkg{sdmTMBextra}}
+#' See the \href{https://github.com/sdmTMB/sdmTMBextra}{\pkg{sdmTMBextra}}
 #' package for the function `predict_mle_mcmc()`, which can generate the MCMC
 #' samples to pass to the `mcmc_samples` argument. Ideally MCMC is run until
 #' convergence and then the last iteration can be used for residuals.
@@ -357,15 +412,21 @@ residuals.sdmTMB <- function(object,
     nd <- object$data
     est_column <- if (model == 1L) "est1" else "est2"
   }
+  if(fam %in% c("truncated_nbinom1", "truncated_nbinom2")){
+    linkinv <- function(eta){exp(eta)}
+  } # for residuals, use untruncated mean
   if (is.null(qres_func)) {
     res_func <- switch(fam,
       gaussian = qres_gaussian,
       binomial = qres_binomial,
+      betabinomial = qres_betabinomial,
       tweedie  = qres_tweedie,
       Beta     = qres_beta,
       Gamma    = qres_gamma,
       nbinom2  = qres_nbinom2,
       nbinom1  = qres_nbinom1,
+      truncated_nbinom2  = qres_truncated_nbinom2,
+      truncated_nbinom1  = qres_truncated_nbinom1,
       poisson  = qres_pois,
       student  = qres_student,
       lognormal  = qres_lognormal,
@@ -388,7 +449,7 @@ residuals.sdmTMB <- function(object,
     if (is.null(mcmc_samples)) {
       msg <- c("As of sdmTMB 0.3.0, `mcmc_samples` must be supplied to use `type = 'mle-mcmc'`.",
         "See ?sdmTMBextra::predict_mle_mcmc after installing",
-        "remotes::install_github('pbs-assess/sdmTMBextra')")
+        "remotes::install_github('sdmTMB/sdmTMBextra')")
       cli_abort(msg)
     }
     mcmc_samples <- as.numeric(mcmc_samples)
