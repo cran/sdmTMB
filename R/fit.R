@@ -751,8 +751,12 @@ sdmTMB <- function(
       msg = "Specified `time` column can't be coerced to a numeric value or contains NAs. Please remove any NAs in the time column."
     )
     if (!is.null(extra_time)) { # 320 protect against factor(time), extra_time clash
-      if (!is.list(formula)) .form <- list(formula)
-      x <- unlist(lapply(list(formula), \(x) attr(stats::terms(x), "term.labels")))
+      if (!is.list(formula)) {
+        .form <- list(formula)
+      } else {
+        .form <- formula
+      }
+      x <- unlist(lapply(.form, \(x) attr(stats::terms(x), "term.labels")))
       xf <- x[grep("factor\\(", x)]
       if (any(c(grep(time, xf), grep(paste0("^", time, "$"), x)))) {
         cli::cli_warn("Detected potential formula-time column clash. E.g., assuming 'year' is your time column: `formula = ... + factor(year)` combined with `time = 'year'`, and 'extra_time' specified. This can produce a non-identiable model because extra factor levels for the missing time slices will be created. To avoid this, rename your factor time column used in your formula. E.g. create a new column 'year_factor' in your data and use that in the formula. See issue https://github.com/sdmTMB/sdmTMB/issues/320.")
@@ -874,7 +878,7 @@ sdmTMB <- function(
     split_formula[[ii]] <- parse_formula(formula_no_sm, data)
 
     # save formula with no bars (but with smoothers)
-    formula_no_bars <- lme4::nobars(formula[ii][[1]])
+    formula_no_bars <- reformulas::nobars(formula[ii][[1]])
     formula_no_bars_no_sm <- remove_s_and_t2(formula_no_bars)
     X_ij[[ii]] <- model.matrix(formula_no_bars_no_sm, data)
     mf[[ii]] <- model.frame(formula_no_bars_no_sm, data)
@@ -1206,6 +1210,7 @@ sdmTMB <- function(
     proj_X_ij = list(matrix(0, ncol = 1, nrow = 1)), # dummy
     proj_X_rw_ik = matrix(0, ncol = 1, nrow = 1), # dummy
     proj_year = 0, # dummy
+    proj_time_include = rep(1L, n_t),
     proj_spatial_index = 0, # dummy
     proj_z_i = matrix(0, nrow = 1, ncol = n_m), # dummy
     indexes_total = numeric(0), # dummy

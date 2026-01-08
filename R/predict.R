@@ -528,6 +528,7 @@ predict.sdmTMB <- function(object, newdata = NULL,
     tmb_data$Zt_list_proj <- Zt_list
     time_lu <- object$time_lu
     tmb_data$proj_year <- time_lu$year_i[match(nd[[object$time]], time_lu$time_from_data)] # was make_year_i(nd[[object$time]])
+    tmb_data$proj_time_include <- as.integer(time_lu$time_from_data %in% nd[[object$time]])
     tmb_data$proj_lon <- newdata[[xy_cols[[1]]]]
     tmb_data$proj_lat <- newdata[[xy_cols[[2]]]]
     tmb_data$calc_se <- as.integer(se_fit)
@@ -775,11 +776,19 @@ predict.sdmTMB <- function(object, newdata = NULL,
         proj_eta <- sr_est_rep[["proj_eta"]]
         se <- sr_se_rep[["proj_eta"]]
       }
-      if (is.na(model)) model_temp <- 1L else model_temp <- model
-      proj_eta <- proj_eta[,model_temp,drop=TRUE]
-      se <- se[,model_temp,drop=TRUE]
-      nd$est <- proj_eta
-      nd$est_se <- se
+
+      # For delta models with model = NA, use combined predictions
+      if (isTRUE(object$family$delta) && is.na(model) && !pop_pred &&
+          "proj_eta_delta" %in% names(sr_est_rep)) {
+        nd$est <- sr_est_rep[["proj_eta_delta"]]
+        nd$est_se <- sr_se_rep[["proj_eta_delta"]]
+      } else {
+        if (is.na(model)) model_temp <- 1L else model_temp <- model
+        proj_eta <- proj_eta[,model_temp,drop=TRUE]
+        se <- se[,model_temp,drop=TRUE]
+        nd$est <- proj_eta
+        nd$est_se <- se
+      }
     }
     if (type == "response" && se_fit) {
       est_name <- if (isTRUE(object$family$delta)) "'est1' and 'est2'" else "'est'"
@@ -815,7 +824,7 @@ predict.sdmTMB <- function(object, newdata = NULL,
             if (object$tmb_data$poisson_link_delta) {
               nd$est <- nd$est1 + nd$est2
             } else {
-              nd$est <- object$family[[2]]$linkfun(p1 * p1)
+              nd$est <- object$family[[2]]$linkfun(p1 * p2)
             }
             if (se_fit) {
               nd$est <- sr_est_rep$proj_rf_delta
