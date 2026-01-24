@@ -1,6 +1,6 @@
-79dea4f311a2b06dcaa58af0f2816b96 *DESCRIPTION
-a8d95be4935900f57097f1fb48fd9747 *NAMESPACE
-9f84f51862f2c24814033033fb11ea7a *NEWS.md
+8c85437790e0b2a496412f94cbe78915 *DESCRIPTION
+398ac8e44db0b0968be324a66935b97e *NAMESPACE
+80bb52dc93e230d9f6f8f95c7a6107f2 *NEWS.md
 2f3134e078450f3bd60b55a5c3c7a57c *R/caic.R
 80eaedac4943eee167abc009feff5526 *R/check.R
 9275d3a7e7e008299144141b37c5c306 *R/cross-val.R
@@ -12,7 +12,7 @@ e96a91a7cb30bf6d14ec18134970217c *R/emmeans.R
 706b9574028fc00909bae212edbe0ff1 *R/enum.R
 1ac3b4892fe2f0401e81d8caa6361964 *R/extra-optimization.R
 4dd2f682966bc0de5872293fd3a2b675 *R/families.R
-4647d56759c443906914735c977cd1da *R/fit.R
+75fab34eabad8b49ea27351824635933 *R/fit.R
 4685a19a912dcfd715cfe1c4da903927 *R/gather-spread.R
 c1e191f8add75c0a3b922fc665ebb91c *R/get-index-sims.R
 2202dfc70cf30d8d6c26364af0885c68 *R/get-range-edge.R
@@ -30,7 +30,7 @@ df89c7dcaa911bb612813983e1d109f8 *R/priors.R
 fdc8a3567d0ba76b2767f19de8bebb21 *R/smoothers.R
 e0b29d3c1b6fa905bbcd3887d1464e7f *R/stacking.R
 8cec082c82c168070fef6bc997408603 *R/tidy.R
-689ae70384703c59095cbe3195fda6cb *R/tmb-sim.R
+5186401348ad0abb7fc16396b1513b06 *R/tmb-sim.R
 38a1c53c4db498f5b7cf4ebda8f0a24c *R/utils.R
 fc40421cfaa43a23b13d0c9553b4fbce *R/visreg.R
 b8769d33f7b07fdb4e845f32de28f685 *R/zzz.R
@@ -44,7 +44,7 @@ b85bdf8d06dd5a82fed6a3d1a1c711a6 *data/pcod_mesh_2011.rda
 466ac3b8b26a6d1037d9ccfca4c9eb23 *data/qcs_grid.rda
 3274b65624db7dd1d84c4a2c94a9a5fd *data/wcvi_grid.rda
 f74fd943ca806c793b27a39da246a789 *data/yelloweye.rda
-26c0a4303766b2274e37e55380cd5bed *inst/CITATION
+ece9379f9ae4d166a23c37b03bdea045 *inst/CITATION
 a77bf8e8bedd3dffb51716ddd1f3abd9 *inst/COPYRIGHTS
 2629186e796d556106fed14232638636 *inst/WORDLIST
 dbb00b2ea984959cdd67bc8f710776ab *inst/doc/model-description.R
@@ -87,14 +87,14 @@ d749e850447ef3e2cb1d8e98d7c91319 *man/reexports.Rd
 0f4306848edbf40ce3c7dd9c8b78da97 *man/residuals.sdmTMB.Rd
 2bf4de5d5addf5fc9a5ba6aa84f3a524 *man/run_extra_optimization.Rd
 27e307988a55ceceb4de1fa01c2bd525 *man/sanity.Rd
-9e977603becb6219a5639f56e55ccd4e *man/sdmTMB.Rd
+5d19f08e843805e966149114ca2ff08a *man/sdmTMB.Rd
 7010e396549ab49f5c685cfa8cc92a82 *man/sdmTMB_cv.Rd
-aa9efea644500a22bb591a664da49d8b *man/sdmTMB_simulate.Rd
 0eed6e8fd89e08b07355b05cf1c89627 *man/sdmTMB_stacking.Rd
 f31c4a031fc77274d4ef07d20558232e *man/sdmTMBcontrol.Rd
 f40e8a78e33a3277648b7a582b47b1c4 *man/set_delta_model.Rd
 8c6a7d016e6ff114fd4e4db514e0a904 *man/sigma.sdmTMB.Rd
-cfacff5073d28d8f5fb77c5357efa25b *man/simulate.sdmTMB.Rd
+8481092ee8222e24107eeaeb29e88620 *man/simulate.sdmTMB.Rd
+9fa2b0a07f7a744017155284a3a22719 *man/simulate_new.Rd
 a9fdc88d125df01919a62d9f2dd74f8b *man/surveydata.Rd
 9b12c5766b4283947fe20f06b8a8258d *man/tidy.sdmTMB.Rd
 82505b97e62f117245c86263d2216faf *man/update.sdmTMB.Rd
@@ -116,7 +116,7 @@ d5c1b0c606235ce6108a7c872c1d5a5e *tests/testthat/test-1-visreg.R
 06088f287157ebec1a370487c97751da *tests/testthat/test-8-delta2.R
 c20671ce655c7e9898d319b410bf98c4 *tests/testthat/test-9-mvn-simulation.R
 e3afea9d31ae421c18069ab6a3896f58 *tests/testthat/test-aniso-plots.R
-06e79a8ca7a565163a83e75e96e4dcf5 *tests/testthat/test-betabinomial.R
+72080a9f2524adc96a8d8a3244743ded *tests/testthat/test-betabinomial.R
 28aa40d75884a8f8e47c97c82caf46e2 *tests/testthat/test-cAIC.R
 602d69594c26d2a5ccfb3dbded271022 *tests/testthat/test-collapse.R
 26f25ddeac07b71b5cbec7f3131026cf *tests/testthat/test-cross-validation.R
@@ -157,7 +157,7 @@ e2e55cd53c4aabb3663beae82806bb61 *tests/testthat/test-sdmTMB-simulate.R
 5feb5756c9659e4e15ebbf92ac3f4ea2 *tests/testthat/test-share-range.R
 8951e1df0734f3a9293ccb2625ee5a9f *tests/testthat/test-smooths.R
 7e57fe2436196a2617a9e8afe7b39edd *tests/testthat/test-threshold-models.R
-dcdca7ee1622079780d91ae612fccfa0 *tests/testthat/test-time-varying.R
+90a42c4064655a77971e0af2b075da51 *tests/testthat/test-time-varying.R
 6ff0edb9a44f06036e9848907e0cc2af *tests/testthat/test-tinyVAST.R
 95cf492c240f0f582cd7c5938d8054af *tests/testthat/test-tmb-simulation.R
 3e094c04f7742a40ca767b1a28430918 *tests/testthat/test-truncated-dists.R
