@@ -380,6 +380,10 @@ coefficients (SVC)</a></li>
 <li><a href="#random-intercepts-and-slopes" id="toc-random-intercepts-and-slopes">Random intercepts and
 slopes</a></li>
 <li><a href="#offset-terms" id="toc-offset-terms">Offset terms</a></li>
+<li><a href="#nonlocal-formula-covariate-diffusion" id="toc-nonlocal-formula-covariate-diffusion">Nonlocal formula
+(covariate diffusion)</a></li>
+<li><a href="#areal-autoregressive-models-sarcar" id="toc-areal-autoregressive-models-sarcar">Areal autoregressive models
+(SAR/CAR)</a></li>
 </ul></li>
 <li><a href="#observation-model-families" id="toc-observation-model-families">Observation model families</a>
 <ul>
@@ -414,7 +418,7 @@ physical barriers into the SPDE</a></li>
 <div id="introduction" class="section level1">
 <h1>Introduction</h1>
 <p>This vignette describes the statistical model underlying sdmTMB.
-Further details are available in the sdmTMB paper <span class="citation">(Anderson <em>et al.</em> 2024)</span>, which should be
+Further details are available in the sdmTMB paper <span class="citation">(Anderson <em>et al.</em> 2025)</span>, which should be
 referenced and cited when using sdmTMB in a publication.</p>
 </div>
 <div id="other-vignettes-available" class="section level1">
@@ -434,14 +438,14 @@ other vignettes describing how to use sdmTMB are available on the <a href="https
 </div>
 <div id="notation-conventions" class="section level1">
 <h1>Notation conventions</h1>
-<p>This appendix uses the following notation conventions, which
+<p>This vignette uses the following notation conventions, which
 generally follow the guidance in <span class="citation">Edwards &amp;
 Auger-Méthé (2019)</span>:</p>
 <ul>
 <li><p>Greek symbols for parameters,</p></li>
 <li><p>the Latin/Roman alphabet for data except for cases where another
 symbol is used by convention,</p></li>
-<li><p>bold symbols for vectors or matrices (e.g., <span class="math inline">\(\boldsymbol{\omega}\)</span> is a vector and <span class="math inline">\(\omega_{\mathbf{s}}\)</span> is the value of <span class="math inline">\(\boldsymbol{\omega}\)</span> at point in space
+<li><p>bold symbols for vectors or matrices (e.g., <span class="math inline">\(\boldsymbol{\omega}\)</span> is a vector and <span class="math inline">\(\omega_{\mathbf{s}}\)</span> is the value of <span class="math inline">\(\boldsymbol{\omega}\)</span> at a point in space
 <span class="math inline">\(\mathbf{s}\)</span>), with Latin/Roman
 symbols in non-italics (e.g., <span class="math inline">\(\mathbf{X}\)</span>, <span class="math inline">\(\mathbf{Q}\)</span>),</p></li>
 <li><p><span class="math inline">\(\phi\)</span> for all distribution
@@ -487,7 +491,7 @@ O_{\mathbf{s},t} +
 response data at point <span class="math inline">\(\mathbf{s}\)</span>
 and time <span class="math inline">\(t\)</span>;</li>
 <li><span class="math inline">\(\eta\)</span> represents the linear
-predictor (i.e., in link space)</li>
+predictor (i.e., in link space);</li>
 <li><span class="math inline">\(\mu\)</span> represents the conditional
 mean on the response/data scale (after applying the inverse link);</li>
 <li><span class="math inline">\(f\)</span> represents a link function
@@ -498,12 +502,12 @@ represents the linear predictor before applying <span class="math inline">\(f^{-
 <span class="math inline">\(\mathbf{X}^{\mathrm{tvc}}\)</span>, and
 <span class="math inline">\(\mathbf{X}^{\mathrm{svc}}\)</span> represent
 design matrices (the superscript identifiers ‘main’ = main effects,
-‘tvc’ = time varying coefficients, and ‘svc’ = spatially varying
+‘tvc’ = time-varying coefficients, and ‘svc’ = spatially varying
 coefficients);</li>
 <li><span class="math inline">\(\boldsymbol{\beta}\)</span> represents a
 vector of fixed-effect coefficients;</li>
 <li><span class="math inline">\(O_{\mathbf{s},t}\)</span> represents an
-offset: a covariate (usually log transformed) with a coefficient fixed
+offset: a covariate (usually log-transformed) with a coefficient fixed
 at one that enters on the linear predictor scale (before the inverse
 link);</li>
 <li><span class="math inline">\(\mathbf{Z}_{g}\)</span> represents the
@@ -600,13 +604,11 @@ s(x)=\tau + \psi\ { \left[ 1+{ e }^{ -\ln \left(19\right) \cdot \left(
 x-s50 \right)
      / \left(s95 - s50 \right) } \right] }^{-1},
 \]</span></p>
-<p>where <span class="math inline">\(s\)</span> represents the logistic
+<p>where <span class="math inline">\(s(x)\)</span> denotes the threshold
 function, <span class="math inline">\(\psi\)</span> is a scaling
-parameter (controlling the height of the y-axis for the response;
-unconstrained), <span class="math inline">\(\tau\)</span> is an
-intercept, <span class="math inline">\(s50\)</span> is a parameter
-controlling the point at which the function reaches 50% of the maximum
-(<span class="math inline">\(\psi\)</span>), and <span class="math inline">\(s95\)</span> is a parameter controlling the point
+parameter (controlling the height of the response curve; unconstrained),
+<span class="math inline">\(\tau\)</span> is an intercept, <span class="math inline">\(s50\)</span> is a parameter controlling the point
+at which the function reaches 50% of the maximum (<span class="math inline">\(\psi\)</span>), and <span class="math inline">\(s95\)</span> is a parameter controlling the point
 at which the function reaches 95% of the maximum. The parameter <span class="math inline">\(s50\)</span> is unconstrained but <span class="math inline">\(s95\)</span> is constrained to be larger than
 <span class="math inline">\(s50\)</span>.</p>
 <p>These models can be fit by including <code>+ logistic(x)</code> in
@@ -669,7 +671,7 @@ or as <code>sigma_E</code> in the output of
 \end{aligned}
 \]</span></p>
 <p>where <span class="math inline">\(\epsilon_{\mathbf{s},t}\)</span>
-represent random field deviations at point <span class="math inline">\(\mathbf{s}\)</span> and time <span class="math inline">\(t\)</span>. The random fields are assumed
+represents random field deviations at point <span class="math inline">\(\mathbf{s}\)</span> and time <span class="math inline">\(t\)</span>. The random fields are assumed
 independent across time steps.</p>
 <p>Similarly to the spatial random fields, these spatiotemporal random
 fields (including all versions described below) are parameterized
@@ -681,7 +683,7 @@ internally with a sparse precision matrix (<span class="math inline">\(\mathbf{Q
 </div>
 <div id="ar1-spatiotemporal-random-fields" class="section level3">
 <h3>AR(1) spatiotemporal random fields</h3>
-<p>First-order auto regressive, AR(1), spatiotemporal random fields
+<p>First-order autoregressive, AR(1), spatiotemporal random fields
 (<code>spatiotemporal = &#39;ar1&#39;</code>) add a parameter defining the
 correlation between random field deviations from one time step to the
 next. They are defined as</p>
@@ -767,14 +769,15 @@ estimated independently:</p>
 \sigma_{\gamma,p}^2 \right).
 \end{aligned}
 \]</span></p>
-<p>In this case, the first time-step value is given an implicit uniform
-prior. I.e., the same variable should not appear in the fixed effect
-formula since the initial value is estimated as part of the time-varying
-formula. The formula <code>time_varying = ~ 1</code> implicitly
-represents a time-varying intercept (assuming the <code>time</code>
-argument has been supplied) and, this case, the intercept should be
-omitted from the main effects (<code>formula ~ + 0 + ...</code> or
-<code>formula ~ -1 + ...</code>).</p>
+<p>In this case, the first time-step value is treated as an
+unconstrained parameter (equivalent to an improper flat prior). That is,
+the same variable should not appear in the fixed-effects formula since
+the initial value is estimated as part of the time-varying formula. The
+formula <code>time_varying = ~ 1</code> implicitly represents a
+time-varying intercept (assuming the <code>time</code> argument has been
+supplied) and, in this case, the intercept should be omitted from the
+main-effects formula (e.g., <code>formula = y ~ 0 + ...</code> or
+<code>formula = y ~ -1 + ...</code>).</p>
 <p>For <code>time_varying_type = &#39;rw0&#39;</code>, the first time step is
 estimated from a mean-zero prior:</p>
 <p><span class="math display">\[
@@ -816,9 +819,9 @@ represents the <span class="math inline">\(l\)</span>-th spatially
 varying coefficient field at location <span class="math inline">\(\mathbf{s}\)</span>. When multiple spatially
 varying coefficients are specified, each is estimated as an independent
 spatial random field with its own marginal variance <span class="math inline">\(\sigma_{\zeta,l}^2\)</span>. Usually, <span class="math inline">\(\mathbf{X}^{\mathrm{svc}}_{\mathbf{s}, t}\)</span>
-would represent a prediction matrix that is constant spatially for a
-given time <span class="math inline">\(t\)</span> as defined by a
-one-sided formula supplied to <code>spatial_varying</code>. For example
+represents the corresponding design matrix for the spatially varying
+coefficient terms, as defined by a one-sided formula supplied to
+<code>spatial_varying</code>. For example
 <code>spatial_varying = ~ 0 + x</code>, where <code>0</code> omits the
 intercept.</p>
 <p>The random fields are parameterized internally with a sparse
@@ -869,11 +872,109 @@ as</p>
 \end{aligned}
 \]</span></p>
 <p>where <span class="math inline">\(O_{\mathbf{s},t}\)</span> is an
-offset term—a <strong>log transformed</strong> variable without a
+offset term—a <strong>log-transformed</strong> variable without a
 coefficient (assuming a log link). The offset is <em>not</em> included
 in the prediction. Therefore, if <code>offset</code> represents a
 measure of effort, for example, the prediction is for one unit of effort
 (<code>log(1) = 0</code>).</p>
+</div>
+<div id="nonlocal-formula-covariate-diffusion" class="section level2">
+<h2>Nonlocal formula (covariate diffusion)</h2>
+<p>Distributed lag terms <span class="citation">(Lindmark <em>et
+al.</em> 2025; Thorson <em>et al.</em> 2026)</span> can be added with
+the <code>nonlocal_formula</code> argument to <code>sdmTMB()</code> as a
+one-sided formula using <code>diffusion()</code> and/or
+<code>time_lag()</code> wrappers. For example:
+<code>~ diffusion(x) + time_lag(x)</code>. Conceptually, these nonlocal
+terms let the effect of a covariate be distributed over nearby locations
+and/or previous time steps, rather than acting only locally and
+instantaneously. This can be useful when ecological responses are
+delayed, transported, or accumulated through space and time. Users
+should consult (and cite) <span class="citation">Lindmark <em>et
+al.</em> (2025)</span> (spatial) and <span class="citation">Thorson
+<em>et al.</em> (2026)</span> (extension to time) for details on the
+model formulation and interpretation.</p>
+<p>These diffused terms enter the linear predictor as transformed
+covariates with estimated coefficients:</p>
+<p><span class="math display">\[
+\mu_{\mathbf{s},t} = f^{-1} \left(\ldots + \sum_{r=1}^{R}
+\beta^{\mathrm{dl}}_{r}\,\tilde{x}_{r,\mathbf{s},t} + \ldots \right),
+\]</span></p>
+<p>where each transformed covariate <span class="math inline">\(\tilde{x}_{r,\mathbf{s},t}\)</span> is constructed
+from the corresponding observed covariate using one of the components
+below.</p>
+<p>For <code>diffusion(x)</code>, each time slice is spatially
+smoothed:</p>
+<p><span class="math display">\[
+\left(\mathbf{M}_0 +
+\kappa_{S}^{-2}\mathbf{M}_1\right)\tilde{\mathbf{x}}_{t} =
+\mathbf{M}_0\mathbf{x}_{t},
+\]</span></p>
+<p>where <span class="math inline">\(\mathbf{x}_t\)</span> is the
+covariate evaluated at mesh vertices at time <span class="math inline">\(t\)</span>, and <span class="math inline">\(\mathbf{M}_0\)</span> and <span class="math inline">\(\mathbf{M}_1\)</span> are SPDE mass and stiffness
+matrices.</p>
+<p>For <code>time_lag(x)</code>, the transformed covariate follows a
+temporal recursion at each vertex:</p>
+<p><span class="math display">\[
+\tilde{x}_{\mathbf{s},1} = x_{\mathbf{s},1}, \qquad
+\tilde{x}_{\mathbf{s},t} = x_{\mathbf{s},t} +
+\kappa_{T}\tilde{x}_{\mathbf{s},t-1} \quad (t &gt; 1).
+\]</span></p>
+<p>Lag-scale parameters are estimated separately for each covariate
+included in <code>nonlocal_formula</code>. <code>time_lag()</code> terms
+require a <code>time</code> argument in <code>sdmTMB()</code>.</p>
+<p>For spatial diffusion terms, the model output also reports
+<code>MSD[...]</code> and <code>RMSD[...]</code>, the implied mean
+squared displacement and root mean squared displacement. With the
+current parameterization, <code>\mathrm{MSD} = 4/\kappa_S^2</code> and
+<code>\mathrm{RMSD} = 2/\kappa_S</code>; <code>RMSD</code> is a typical
+diffusion distance (a blur radius) in coordinate units, where larger
+values imply broader smoothing and smaller values imply more local
+diffusion.</p>
+</div>
+<div id="areal-autoregressive-models-sarcar" class="section level2">
+<h2>Areal autoregressive models (SAR/CAR)</h2>
+<p>In addition to continuous-space SPDE random fields, sdmTMB can fit
+areal spatial autoregressive models with
+<code>spatial_model = &quot;sar&quot;</code> or
+<code>spatial_model = &quot;car&quot;</code>. These require an areal domain
+supplied to <code>mesh</code> with the help of
+<code>make_areal_domain()</code>.</p>
+<p>For both areal options, the latent spatial and spatiotemporal effects
+are Gaussian Markov random fields with precision defined by the areal
+weight matrix <span class="math inline">\(\mathbf{W}\)</span>:</p>
+<p><span class="math display">\[
+\boldsymbol{\omega}\sim \mathrm{MVNormal}\left(\boldsymbol{0},
+\sigma_\omega^2 \mathbf{Q}^{-1}\right), \:
+\boldsymbol{\epsilon}_t \sim \mathrm{MVNormal}\left(\boldsymbol{0},
+\sigma_\epsilon^2 \mathbf{Q}^{-1}\right).
+\]</span></p>
+<p>For SAR (<code>spatial_model = &quot;sar&quot;</code>), the precision matrix
+is</p>
+<p><span class="math display">\[
+\mathbf{Q}_{\mathrm{SAR}} = \left(\mathbf{I} -
+\rho_{\mathrm{SAR}}\mathbf{W}\right)^\top
+\left(\mathbf{I} - \rho_{\mathrm{SAR}}\mathbf{W}\right),
+\]</span></p>
+<p>where <span class="math inline">\(\rho_{\mathrm{SAR}} \in (-1,
+1)\)</span> is reported as <code>rho_sar</code>. By default, SAR uses a
+row-normalized <span class="math inline">\(\mathbf{W}\)</span>
+(<code>sar_weight_style = &quot;row&quot;</code>), with an option to use raw
+weights. With <code>sar_weight_style = &quot;raw&quot;</code>, SAR uses the
+unnormalized adjacency/weight matrix directly, so neighbor influence
+depends on the original edge weights (and, if unweighted, on the number
+of neighbors) rather than being scaled to sum to 1 within each row.</p>
+<p>For CAR (<code>spatial_model = &quot;car&quot;</code>), the precision matrix
+is</p>
+<p><span class="math display">\[
+\mathbf{Q}_{\mathrm{CAR}} = \mathbf{D} -
+\alpha_{\mathrm{CAR}}\mathbf{W},
+\]</span></p>
+<p>where <span class="math inline">\(\mathbf{D}\)</span> is diagonal
+with elements <span class="math inline">\(D_{ii} = \sum_j
+W_{ij}\)</span> and <span class="math inline">\(\alpha_{\mathrm{CAR}}
+\in (0, 1)\)</span> is reported as <code>alpha_car</code>. CAR requires
+a symmetric adjacency matrix.</p>
 </div>
 </div>
 <div id="observation-model-families" class="section level1">
@@ -920,15 +1021,13 @@ TMB</a>.</p>
 \]</span> where <span class="math inline">\(N\)</span> is the number of
 trials, <span class="math inline">\(\mu\)</span> is the mean success
 probability, and <span class="math inline">\(\phi\)</span> is a
-precision parameter that controls overdispersion relative to a Binomial.
-The implied Beta parameters are <span class="math inline">\(\alpha = \mu
-\phi\)</span> and <span class="math inline">\(\beta = (1 -
-\mu)\phi\)</span>, and the variance is $ [y] = N (1 - ), , $ which
-exceeds the Binomial variance unless <span class="math inline">\(\phi
-\to \infty\)</span>. Available links are logit and cloglog. This family
-is useful for overdispersed counts of successes/failures (e.g.,
-aggregated Bernoulli data, proportions with extra-binomial
-variation).</p>
+precision parameter that controls overdispersion relative to a Binomial
+distribution. The implied Beta parameters are <span class="math inline">\(\alpha = \mu \phi\)</span> and <span class="math inline">\(\beta = (1 - \mu)\phi\)</span>, and the variance
+is $ [y] = N (1 - ), , $ which exceeds the Binomial variance unless
+<span class="math inline">\(\phi \to \infty\)</span>. Available links
+are logit and cloglog. This family is useful for overdispersed counts of
+successes/failures (e.g., aggregated Bernoulli data, proportions with
+extra-binomial variation).</p>
 <p>Code defined <a href="https://github.com/sdmTMB/sdmTMB/blob/18a39eabc111e2179fa589f942c8820d87ad10df/src/utils.h#L505-L512">within
 sdmTMB</a> and implemented in the TMB likelihood at
 <code>src/sdmTMB.cpp</code> (e.g., lines 974–982).</p>
@@ -1161,17 +1260,17 @@ TMB</a>.</p>
 \operatorname{Student-t} \left( \mu, \phi, \nu \right)
 \]</span></p>
 <p>where <span class="math inline">\(\nu\)</span>, the degrees of
-freedom (<code>df</code>), is a user-supplied fixed parameter. Lower
-values of <span class="math inline">\(\nu\)</span> result in heavier
-tails compared to the Gaussian distribution. Above approximately
-<code>df = 20</code>, the distribution becomes very similar to the
-Gaussian. The Student-t distribution with a low degrees of freedom
-(e.g., <span class="math inline">\(\nu \le 7\)</span>) can be helpful
-for modelling data that would otherwise be suitable for Gaussian but
-needs an approach that is robust to outliers <span class="citation">(e.g., Anderson <em>et al.</em> 2017)</span>.</p>
+freedom (<code>df</code>), is estimated by default and can optionally be
+fixed by the user. Lower values of <span class="math inline">\(\nu\)</span> result in heavier tails compared to
+the Gaussian distribution. Above approximately <code>df = 20</code>, the
+distribution becomes very similar to the Gaussian. The Student-t
+distribution with a low degrees of freedom (e.g., <span class="math inline">\(\nu \le 7\)</span>) can be helpful for modelling
+data that would otherwise be suitable for Gaussian but needs an approach
+that is robust to outliers <span class="citation">(e.g., Anderson <em>et
+al.</em> 2017)</span>.</p>
 <p>Code defined <a href="https://github.com/sdmTMB/sdmTMB/blob/18a39eabc111e2179fa589f942c8820d87ad10df/src/utils.h#L37-L45">within
 sdmTMB</a> based on the <code>dt()</code> distribution in TMB.</p>
-<p>Example: <code>family = student(link = &quot;log&quot;, df = 7)</code></p>
+<p>Example: <code>family = student(link = &quot;identity&quot;, df = 7)</code></p>
 </div>
 </div>
 <div id="zero-inflated-and-hurdle-structures" class="section level2">
@@ -1210,7 +1309,7 @@ the first linear predictor with:</p>
 <span id="cb4-3"><a href="#cb4-3" tabindex="-1"></a>  <span class="at">family =</span> <span class="fu">delta_gamma</span>(),</span>
 <span id="cb4-4"><a href="#cb4-4" tabindex="-1"></a>  <span class="at">spatial =</span> <span class="fu">list</span>(<span class="st">&quot;on&quot;</span>, <span class="st">&quot;off&quot;</span>)</span>
 <span id="cb4-5"><a href="#cb4-5" tabindex="-1"></a>)</span></code></pre></div>
-<p>Or for we may want separate main-effects formulas. For example:</p>
+<p>Or we may want separate main-effects formulas. For example:</p>
 <div class="sourceCode" id="cb5"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" tabindex="-1"></a><span class="fu">sdmTMB</span>(</span>
 <span id="cb5-2"><a href="#cb5-2" tabindex="-1"></a>  <span class="at">formula =</span> <span class="fu">list</span>(</span>
 <span id="cb5-3"><a href="#cb5-3" tabindex="-1"></a>    y <span class="sc">~</span> depth <span class="sc">+</span> <span class="fu">I</span>(depth<span class="sc">^</span><span class="dv">2</span>), </span>
@@ -1262,25 +1361,25 @@ spatially varying coefficient field always shares <span class="math inline">\(\k
 matrix</h2>
 <p>The values of the spatial variables at the knots are multiplied by a
 projection matrix <span class="math inline">\(\mathbf{A}\)</span> that
-bilinearly interpolates from the knot locations to the values at the
-locations of the observed or predicted data <span class="citation">(Lindgren &amp; Rue 2015)</span></p>
+linearly interpolates within mesh triangles from the knot locations to
+the locations of the observed or predicted data <span class="citation">(Lindgren &amp; Rue 2015)</span></p>
 <p><span class="math display">\[
 \boldsymbol{\omega}^* = \mathbf{A}\boldsymbol{\omega},
 \]</span> where <span class="math inline">\(\boldsymbol{\omega}^*\)</span> represents the
 values of the spatial random fields at the observed locations or
 predicted data locations. The matrix <span class="math inline">\(\mathbf{A}\)</span> has a row for each data point
 or prediction point and a column for each knot. Three non-zero elements
-on each row define the weight of the neighbouring 3 knot locations for
-location <span class="math inline">\(\mathbf{s}\)</span>. The same
-bilinear interpolation happens for any spatiotemporal random fields</p>
+on each row define the weights of the three neighbouring knot locations
+for location <span class="math inline">\(\mathbf{s}\)</span>. The same
+interpolation happens for any spatiotemporal random fields</p>
 <p><span class="math display">\[
 \boldsymbol{\epsilon}_t^* = \mathbf{A}\boldsymbol{\epsilon}_t.
 \]</span></p>
 </div>
 <div id="anisotropy" class="section level2">
 <h2>Anisotropy</h2>
-<p>TMB allows for anisotropy, where spatial covariance may be asymmetric
-with respect to latitude and longitude (<a href="https://kaskr.github.io/adcomp/namespaceR__inla.html">full
+<p>TMB allows for anisotropy, where spatial covariance may depend on
+direction (<a href="https://kaskr.github.io/adcomp/namespaceR__inla.html">full
 details</a>). Anisotropy can be turned on or off with the logical
 <code>anisotropy</code> argument to <code>sdmTMB()</code>. There are a
 number of ways to implement anisotropic covariance <span class="citation">(Fuglstad <em>et al.</em> 2015)</span>, and we adopt a
@@ -1299,8 +1398,8 @@ islands, lakes). SPDE models allow for physical barriers to be
 incorporated into the modelling <span class="citation">(Bakka <em>et
 al.</em> 2019)</span>. With <code>sdmTMB()</code> models, the mesh
 construction occurs in two steps: the user (1) constructs a mesh with a
-call to <code>sdmTMBextra::make_mesh()</code>, and (2) passes the mesh
-to <code>sdmTMBextra::add_barrier_mesh()</code>. The barriers must be
+call to <code>sdmTMB::make_mesh()</code>, and (2) passes the mesh to
+<code>sdmTMBextra::add_barrier_mesh()</code>. The barriers must be
 constructed as <code>sf</code> objects <span class="citation">(Pebesma
 2018)</span> with polygons defining the barriers. See
 <code>?sdmTMBextra::add_barrier_mesh</code> for an example.</p>
@@ -1318,7 +1417,7 @@ issues.</p>
 website</a> by Francesco Serafini and Haakon Bakka provides an
 illustration with INLA. The implementation within TMB was borrowed from
 code written by Olav Nikolai Breivik and Hans Skaug at the <a href="https://github.com/skaug/tmb-case-studies">TMB Case Studies</a>
-Github site.</p>
+GitHub site.</p>
 </div>
 </div>
 <div id="optimization" class="section level1">
@@ -1346,7 +1445,7 @@ second phase, the random-effect parameters (and their variances) are
 also estimated. Fixed-effect parameters are also estimated in the second
 phase and are initialized at their estimates from the first phase.</p>
 <p>In some cases, a single call to <code>stats::nlminb()</code> may not
-be result in convergence (e.g., the maximum gradient of the marginal
+result in convergence (e.g., the maximum gradient of the marginal
 likelihood with respect to fixed-effect parameters is not small enough
 yet), and the algorithm may need to be run multiple times. In the
 <code>sdmTMB::sdmTMBcontrol()</code> function, we include an argument
@@ -1385,7 +1484,7 @@ specified given the data. Standard errors can be observed in the output
 of <code>print.sdmTMB()</code> or by checking
 <code>fit$sd_report</code>. The maximum gradient of the marginal
 likelihood with respect to fixed-effect parameters can be checked by
-inspecting (<code>fit$gradients</code>). Guidance varies, but gradients
+inspecting <code>fit$gradients</code>. Guidance varies, but gradients
 should be very close to zero (e.g., on the order of <span class="math inline">\(10^{-3}\)</span> or smaller after reasonable
 parameter scaling) before assuming the fitting routine is consistent
 with convergence. If maximum gradients are already relatively small,
@@ -1659,10 +1758,10 @@ Academy of Sciences</em>, <strong>114</strong>, 3252–3257.
 </div>
 <div id="ref-sdmTMB" class="csl-entry">
 Anderson, S.C., Ward, E.J., English, P.A., Barnett, L.A.K. &amp;
-Thorson, J.T. (2024). <a href="https://doi.org/10.1101/2022.03.24.485545"><span class="nocase">sdmTMB</span>: An <span>R</span> package for fast,
+Thorson, J.T. (2025). <a href="https://doi.org/10.18637/jss.v115.i02"><span class="nocase">sdmTMB</span>: An <span>R</span> package for fast,
 flexible, and user-friendly generalized linear mixed effects models with
-spatial and spatiotemporal random fields</a>. <em>bioRxiv</em>,
-<strong>2022.03.24.485545</strong>.
+spatial and spatiotemporal random fields</a>. <em>Journal of Statistical
+Software</em>, <strong>115</strong>, 1–46.
 </div>
 <div id="ref-bakka2019" class="csl-entry">
 Bakka, H., Vanhatalo, J., Illian, J., Simpson, D. &amp; Rue, H. (2019).
@@ -1739,6 +1838,12 @@ random fields: The stochastic partial differential equation approach.
 <em>J. R. Stat. Soc. Ser. B Stat. Methodol.</em>, <strong>73</strong>,
 423–498.
 </div>
+<div id="ref-lindmark2025" class="csl-entry">
+Lindmark, M., Anderson, S.C. &amp; Thorson, J.T. (2025). <a href="https://doi.org/10.1111/2041-210X.70177">Estimating
+scale-dependent covariate responses using two-dimensional diffusion
+derived from the stochastic partial differential equation method</a>.
+<em>Methods in Ecology and Evolution</em>, <strong>17</strong>, 207–218.
+</div>
 <div id="ref-pebesma2018" class="csl-entry">
 Pebesma, E. (2018). <span class="nocase">Simple Features for R:
 Standardized Support for Spatial Vector Data</span>. <em><span>The R
@@ -1766,6 +1871,11 @@ Thorson, J.T. (2018). <a href="https://doi.org/10.1139/cjfas-2017-0266">Three pr
 conventional delta-model for biomass sampling data, and a
 computationally efficient alternative</a>. <em>Canadian Journal of
 Fisheries and Aquatic Sciences</em>, <strong>75</strong>, 1369–1382.
+</div>
+<div id="ref-thorson2026" class="csl-entry">
+Thorson, J., Anderson, S. &amp; Lindmark, M. (2026). <a href="https://doi.org/10.32942/X2W95P">Temperature carryover effect
+revealed for marine fishes using spatio-temporal distributed lag
+models</a>.
 </div>
 <div id="ref-thorson2011" class="csl-entry">
 Thorson, J.T., Stewart, I.J. &amp; Punt, A.E. (2011). <a href="https://doi.org/10.1139/f2011-086">Accounting for fish shoals in

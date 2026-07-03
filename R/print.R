@@ -41,6 +41,21 @@ print_model_info <- function(x) {
 
   mesh <- paste0("Mesh: ", extract_call_name(x$call$mesh), " (", covariance, " covariance)\n")
   data <- paste0("Data: ", extract_call_name(x$call$data), "\n")
+  nonlocal_formula <- NULL
+  if (!is.null(x$nonlocal_formula_parsed) &&
+      !is.null(x$nonlocal_formula_parsed$terms) &&
+      nrow(x$nonlocal_formula_parsed$terms) > 0L) {
+    nl_terms <- x$nonlocal_formula_parsed$terms
+    nl_labels <- paste0(nl_terms$component, "(", nl_terms$variable, ")")
+    nonlocal_formula <- paste0("Nonlocal formula: ", paste(nl_labels, collapse = " + "), "\n")
+  } else if ("nonlocal_formula" %in% names(x$call)) {
+    nl_name <- extract_call_name(x$call$nonlocal_formula)
+    if (!is.null(nl_name) && nl_name != "NULL") {
+      nonlocal_formula <- paste0("Nonlocal formula: ", nl_name, "\n")
+      nonlocal_formula <- gsub('\\"', "", nonlocal_formula)
+      nonlocal_formula <- gsub("\\'", "", nonlocal_formula)
+    }
+  }
 
   if ("clean_name" %in% names(x$family)) {
     overall_family <- x$family$clean_name
@@ -70,6 +85,7 @@ print_model_info <- function(x) {
     family1,
     family2,
     overall_family,
+    nonlocal_formula,
     criterion,
     covariance
   )
@@ -259,27 +275,25 @@ print_int_slope_re <- function(x, m = 1) {
   if (sum(x$tmb_data$n_re_groups)) {
     v <- tidy(x, effects = "ran_vcov", model = m)
     cnms <- x$split_formula[[m]]$re_cov_terms$cnms
-    ll <- vapply(cnms, length, FUN.VALUE = 1L)
-    mmc2 <- unlist(cnms, use.names = FALSE)
-    mmc1 <- lapply(names(ll), \(na) rep(na, ll[[na]])) |> unlist()
-    mmc1[duplicated(mmc1)] <- ""
-    mmsd <- lapply(v[[1]], \(x) {
-      if (ncol(x) == 2L) {
-        c(x[1,1], x[2,2])
-      } else {
-        c(x[1,1])
-      }
+    display_groups <- unique(names(cnms))
+    terms <- lapply(display_groups, function(group) {
+      unlist(cnms[names(cnms) == group], use.names = FALSE)
     })
-    mmsd <- unlist(mmsd, use.names = FALSE)
+    mmc1 <- unlist(Map(function(group, term) {
+      c(group, rep("", length(term) - 1L))
+    }, display_groups, terms), use.names = FALSE)
+    mmc2 <- unlist(terms, use.names = FALSE)
+    mmsd <- unlist(lapply(v[[1]], diag), use.names = FALSE)
     mmvar <- mmsd^2
-    mmcor <- lapply(v[[1]], \(x) {
-      if (ncol(x) == 2L) {
-        c("", mround(x[2,1], 2))
-      } else {
-        ""
+    mmcor <- unlist(lapply(v[[1]], function(mat) {
+      out <- rep("", nrow(mat))
+      if (nrow(mat) > 1L) {
+        for (i in 2:nrow(mat)) {
+          out[i] <- paste(mround(mat[i, seq_len(i - 1L)], 2), collapse = " ")
+        }
       }
-    })
-    mmcor <- unlist(mmcor, use.names = FALSE)
+      out
+    }), use.names = FALSE)
     mm <- cbind(mmc1, mmc2, mround(mmvar, 2), mround(mmsd, 2), mmcor)
     colnames(mm) <- c("Groups", "Name", "Variance", "Std.Dev.", "Corr")
     rownames(mm) <- rep("", nrow(mm))
@@ -333,6 +347,9 @@ print_time_varying <- function(x, m = 1) {
 }
 
 print_range <- function(x, m = 1L, digits = 2L) {
+  if (is_areal_fit(x)) {
+    return(NULL)
+  }
   b <- tidy(x, effects = "ran_pars", model = m, silent = TRUE)
   range <- b$estimate[b$term == "range"]
   if (is.null(range)) {
@@ -353,7 +370,7 @@ print_range <- function(x, m = 1L, digits = 2L) {
     range_text <- print_anisotropy(x = x, m = m)
   }
 
-  if (x$spatial[m] == "off" && x$spatiotemporal[m] == "off") {
+  if (x$spatial[m] == "off" && x$spatiotemporal[m] == "off" && is.null(x$spatial_varying)) {
     range_text <- NULL
   }
 
@@ -418,6 +435,9 @@ print_anisotropy <- function(x, m = 1L, digits = 1L, return_dat = FALSE) {
 
 print_other_parameters <- function(x, m = 1L) {
   b <- tidy(x, "ran_pars", model = m, silent = TRUE)
+  is_areal <- is_areal_fit(x)
+  is_car <- is_car_fit(x)
+  areal_label <- if (is_car) "CAR" else "SAR"
 
   get_term_text <- function(term_name = "", pretext = "") {
     b2 <- as.list(x$sd_report, what = "Estimate")
@@ -432,6 +452,14 @@ print_other_parameters <- function(x, m = 1L) {
     }
     a
   }
+  nonlocal_term_text <- function(term_prefix = "", pretext = "") {
+    idx <- grepl(paste0("^", term_prefix, "\\["), b$term)
+    if (!any(idx)) {
+      return("")
+    }
+    a <- paste0(b$term[idx], "=", mround(b$estimate[idx], 2L))
+    paste0(pretext, ": ", paste(a, collapse = ", "), "\n")
+  }
 
   phi <- get_term_text("phi", "Dispersion parameter")
   tweedie_p <- get_term_text("tweedie_p", "Tweedie p")
@@ -439,11 +467,24 @@ print_other_parameters <- function(x, m = 1L) {
   gengamma_par <- if ('gengamma' %in% family(x)[[m]]) {
     get_term_text("gengamma_Q", "Generalized gamma Q")
     } else ""
-  sigma_O <- get_term_text("sigma_O", "Spatial SD")
+  sigma_O <- if (is_areal) {
+    get_term_text("sigma_O", paste("Spatial", areal_label, "field scale"))
+  } else {
+    get_term_text("sigma_O", "Spatial SD")
+  }
   xtra <- if (x$spatiotemporal[m] == "ar1") "marginal " else ""
-  sigma_E <- get_term_text("sigma_E",
-    paste0("Spatiotemporal ", xtra, toupper(x$spatiotemporal[m]), " SD"))
+  sigma_E <- if (is_areal) {
+    get_term_text("sigma_E",
+      paste0("Spatiotemporal ", xtra, toupper(x$spatiotemporal[m]), " ", areal_label, " field scale"))
+  } else {
+    get_term_text("sigma_E",
+      paste0("Spatiotemporal ", xtra, toupper(x$spatiotemporal[m]), " SD"))
+  }
   rho <- get_term_text("rho", "Spatiotemporal AR1 correlation (rho)")
+  rho_sar <- get_term_text("rho_sar", "SAR spatial dependence")
+  alpha_car <- get_term_text("alpha_car", "CAR spatial dependence")
+  rhoT <- nonlocal_term_text("rhoT", "Nonlocal temporal persistence")
+  RMSD <- nonlocal_term_text("RMSD", "Nonlocal RMSD")
 
   if ("sigma_Z" %in% b$term) {
     # tidy() takes sigma_Z from the sdreport,
@@ -451,15 +492,23 @@ print_other_parameters <- function(x, m = 1L) {
     sigma_Z <- x$tmb_obj$report(x$tmb_obj$env$last.par.best)$sigma_Z
     sigma_Z <- sigma_Z[,m,drop=TRUE]
     a <- mround(sigma_Z, 2L)
-    sigma_Z <- paste0("Spatially varying coefficient SD (", x$spatial_varying,  "): ", a, "\n")
+    sigma_label <- if (is_areal) paste("Spatially varying coefficient", areal_label, "field scale") else "Spatially varying coefficient SD"
+    sigma_Z <- paste0(sigma_label, " (", x$spatial_varying,  "): ", a, "\n")
     sigma_Z <- gsub("\\(\\(", "\\(", sigma_Z) # ((Intercept))
     sigma_Z <- gsub("\\)\\)", "\\)", sigma_Z) # ((Intercept))
-    sigma_Z <- paste(sigma_Z, collapse = "")
+    if (isTRUE(x$svc_omega_is_intercept)) {
+      sigma_Z <- paste0(
+        "Spatial field also serves as the SVC intercept/reference-level field\n",
+        paste(sigma_Z, collapse = "")
+      )
+    } else {
+      sigma_Z <- paste(sigma_Z, collapse = "")
+    }
   } else {
     sigma_Z <- ""
   }
 
-  named_list(phi, tweedie_p, student_df, sigma_O, sigma_E, sigma_Z, rho, gengamma_par)
+  named_list(phi, tweedie_p, student_df, sigma_O, sigma_E, sigma_Z, rho, rho_sar, alpha_car, rhoT, RMSD, gengamma_par)
 }
 
 print_header <- function(x) {
@@ -469,6 +518,7 @@ print_header <- function(x) {
   cat(info$mesh)
   cat(info$time)
   cat(info$data)
+  cat(info$nonlocal_formula)
   cat(info$overall_family)
 }
 
@@ -518,10 +568,14 @@ print_one_model <- function(x, m = 1, edf = FALSE, silent = FALSE) {
   cat(other$student_df)
   cat(other$gengamma_par)
   cat(other$rho)
+  cat(other$rho_sar)
+  cat(other$alpha_car)
+  cat(other$rhoT)
   cat(range)
   cat(other$sigma_O)
   cat(other$sigma_Z)
   cat(other$sigma_E)
+  cat(other$RMSD)
 }
 print_footer <- function(x) {
   info <- print_model_info(x)

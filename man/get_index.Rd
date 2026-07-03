@@ -9,7 +9,15 @@
 \title{Extract a relative biomass/abundance index, center of gravity, effective
 area occupied, or weighted average}
 \usage{
-get_index(obj, bias_correct = TRUE, level = 0.95, area = 1, silent = TRUE, ...)
+get_index(
+  obj,
+  bias_correct = TRUE,
+  level = 0.95,
+  area = 1,
+  silent = TRUE,
+  derived_link = NULL,
+  ...
+)
 
 get_index_split(
   obj,
@@ -20,6 +28,7 @@ get_index_split(
   area = 1,
   silent = FALSE,
   predict_args = list(),
+  derived_link = NULL,
   ...
 )
 
@@ -30,6 +39,7 @@ get_cog(
   format = c("long", "wide"),
   area = 1,
   silent = TRUE,
+  derived_link = NULL,
   ...
 )
 
@@ -40,14 +50,23 @@ get_weighted_average(
   level = 0.95,
   area = 1,
   silent = TRUE,
+  derived_link = NULL,
   ...
 )
 
-get_eao(obj, bias_correct = FALSE, level = 0.95, area = 1, silent = TRUE, ...)
+get_eao(
+  obj,
+  bias_correct = FALSE,
+  level = 0.95,
+  area = 1,
+  silent = TRUE,
+  derived_link = NULL,
+  ...
+)
 }
 \arguments{
 \item{obj}{Output from \code{\link[=predict.sdmTMB]{predict.sdmTMB()}} with \code{return_tmb_object = TRUE}
-(the usual case). Alternatively, if \code{\link[=sdmTMB]{sdmTMB()}} was called with \code{do_index = TRUE}, or if using \code{\link[=get_index_split]{get_index_split()}}, an object from \code{\link[=sdmTMB]{sdmTMB()}}.}
+(the most common case). Alternatively, if \code{\link[=sdmTMB]{sdmTMB()}} was called with \code{do_index = TRUE}, or if using \code{\link[=get_index_split]{get_index_split()}}, an object from \code{\link[=sdmTMB]{sdmTMB()}}.}
 
 \item{bias_correct}{Should bias correction be implemented via
 \code{\link[TMB:sdreport]{TMB::sdreport()}}? Bias correction accounts for the non-linear
@@ -61,9 +80,15 @@ calculation while experimenting with models. See Thorson and Kristensen
 \item{area}{Grid cell area for area weighting the index. Can be: (1) a
 numeric vector of length \code{nrow(newdata)} with area for each grid cell, (2)
 a single numeric value to apply to all grid cells, or (3) a character value
-giving the column name in \code{newdata} containing areas.}
+giving the column name in \code{newdata} containing areas. See Details for
+non-spatial uses of \code{area} as an integration multiplier.}
 
-\item{silent}{Silent?}
+\item{silent}{Logical. Suppress progress messages?}
+
+\item{derived_link}{Optional override for the inverse link used when
+calculating derived quantities such as the index. By default, the fitted
+family link is used. Currently supported for non-delta \code{binomial()} and
+\code{betabinomial()} models fit with \code{link = "cloglog"}.}
 
 \item{...}{Passed to \code{\link[TMB:sdreport]{TMB::sdreport()}}.}
 
@@ -109,6 +134,16 @@ intervals, and standard error of the estimates.
 \description{
 Extract a relative biomass/abundance index, center of gravity, effective
 area occupied, or weighted average
+}
+\details{
+More generally, \code{area} is the multiplier used to integrate response-scale
+predictions. For binomial or beta-binomial models fit to proportions with
+\code{weights} specifying the number of trials, predictions are expected
+proportions per trial. In that case, \code{area} can be used as a standard number
+of trials (e.g., hooks per longline set) to obtain an expected-count index.
+The original fitting \code{weights} are not automatically reused for index
+standardization; supply the desired standardization multiplier through
+\code{area}.
 }
 \examples{
 \dontshow{if (ggplot2_installed()) withAutoprint(\{ # examplesIf}
@@ -182,7 +217,7 @@ Geostatistical delta-generalized linear mixed models improve precision for
 estimated abundance indices for West Coast groundfishes. ICES J. Mar. Sci.
 72(5): 1297–1310. \doi{10.1093/icesjms/fsu243}
 
-Geostatistical model-based centre of gravity:
+Geostatistical model-based center of gravity:
 
 Thorson, J.T., Pinsky, M.L., and Ward, E.J. 2016. Model-based inference for
 estimating shifts in species distribution, area occupied and centre of

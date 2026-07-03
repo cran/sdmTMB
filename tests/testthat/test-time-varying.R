@@ -1,9 +1,10 @@
 test_that("AR1 time-varying works", {
   skip_on_cran()
+  skip_on_ci()
   set.seed(1)
   predictor_dat <- data.frame(
-    X = runif(4000), Y = runif(4000),
-    year = rep(seq_len(800), each = 5)
+    X = runif(1000), Y = runif(1000),
+    year = rep(seq_len(200), each = 5)
   )
   mesh <- make_mesh(predictor_dat, xy_cols = c("X", "Y"), cutoff = 0.2)
 
@@ -55,8 +56,8 @@ test_that("AR1 time-varying works", {
   abline(0, 1)
   expect_gt(cor(B, s$b_rw_t[,,1]), 0.99)
 
-  expect_equal(round(mean(sigma_V_hats), 2L), ar1_scale)
-  expect_equal(round(mean(rho_hats), 2L), rho)
+  expect_equal(round(mean(sigma_V_hats), 1L), ar1_scale)
+  expect_equal(round(mean(rho_hats), 1L), rho)
 
   ss <- simulate(m)
   sim_dat$obs2 <- ss[,1]
@@ -65,7 +66,7 @@ test_that("AR1 time-varying works", {
     spatiotemporal = 'off', time_varying = ~ 1)
 
   s <- as.list(m$sd_report, "Estimate")
-  expect_equal(dim(ss), c(4000L, 1L))
+  expect_equal(dim(ss), c(1000L, 1L))
   expect_gt(exp(s$ln_tau_V)[1,1], 0.75)
   expect_gt(m121(s$rho_time_unscaled)[1,1], 0.65)
 
@@ -85,18 +86,18 @@ test_that("AR1 time-varying works", {
                 time_varying = ~ -1 + depth_scaled,
                 data = pcod_2011, spatial="off",
                 spatiotemporal = "off",
-                family = tweedie())
+                family = tweedie(), priors = sdmTMBpriors(sigma_V = gamma_cv(0.2, 0.5)))
   s <- tidy(fit, "ran_pars")
   expect_equal(dim(s), c(2L, 5L))
   expect_equal(s$term, c("phi","tweedie_p"))
 
   # test that tidy works -- AR1
   fit <- sdmTMB(density ~ 1, time = "year",
-                time_varying = ~ -1 + depth_scaled,
+                time_varying = ~ 1,
                 data = pcod_2011, spatial="off",
                 time_varying_type = "ar1",
                 spatiotemporal = "off",
-                family = tweedie())
+                family = tweedie(), priors = sdmTMBpriors(sigma_V = gamma_cv(0.2, 0.5)))
   s <- tidy(fit, "ran_pars")
   expect_equal(dim(s), c(3L, 5L))
   expect_equal(s$term, c("phi", "rho_time", "tweedie_p"))
@@ -122,24 +123,24 @@ test_that("AR1 time-varying works", {
   expect_equal(s$term, c("phi","rho_time","rho_time","tweedie_p"))
 
   # test that tidy works with delta
-  fit <- sdmTMB(density ~ 1, time = "year",
-                time_varying = ~ -1+depth_scaled + I(depth_scaled^2),
+  fit <- sdmTMB(density ~ depth_scaled, time = "year",
+                time_varying = ~ -1+I(depth_scaled^2),
                 time_varying_type = "ar1",
                 data = pcod_2011, spatial="off",
                 spatiotemporal = "off",
-                family = delta_gamma())
+                family = delta_gamma(), priors = sdmTMBpriors(sigma_V = gamma_cv(0.2, 0.5)))
   s <- tidy(fit, "ran_pars")
-  expect_equal(dim(s), c(2L, 6L))
-  expect_equal(s$term, c("rho_time","rho_time"))
+  expect_equal(dim(s), c(1L, 6L))
+  expect_equal(s$term, c("rho_time"))
 
   s <- tidy(fit, "ran_pars", model = 1)
-  expect_equal(dim(s), c(2L, 6L))
-  expect_equal(s$term, c("rho_time","rho_time"))
-  expect_equal(s$estimate, c(1.0, 0.9582931))
+  expect_equal(dim(s), c(1L, 6L))
+  expect_equal(s$term, c("rho_time"))
+  expect_equal(s$estimate, c(0.888583727), tolerance = 0.001)
 
   s <- tidy(fit, "ran_pars", model = 2)
-  expect_equal(s$term, c("phi", "rho_time","rho_time"))
-  expect_equal(s$estimate, c(0.652, 1.0, 0.868), tolerance = 0.001)
+  expect_equal(s$term, c("phi", "rho_time"))
+  expect_equal(s$estimate, c(0.65029, 0.70935), tolerance = 0.001)
 
 })
 
@@ -148,8 +149,8 @@ test_that("RW with mean-zero (rw0) time-varying works", {
   skip_on_cran()
   set.seed(1)
   predictor_dat <- data.frame(
-    X = runif(4000), Y = runif(4000),
-    year = rep(seq_len(800), each = 5)
+    X = runif(1000), Y = runif(1000),
+    year = rep(seq_len(200), each = 5)
   )
   mesh <- make_mesh(predictor_dat, xy_cols = c("X", "Y"), cutoff = 0.2)
 

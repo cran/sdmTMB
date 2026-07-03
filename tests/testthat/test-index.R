@@ -13,10 +13,14 @@ test_that("get_index works", {
   predictions <- predict(m, newdata = nd, return_tmb_object = TRUE)
   ind <- get_index(predictions, bias_correct = FALSE)
   ind
+  expect_s3_class(ind, "data.frame")
   expect_equal(ind$est, c(231093.53593233, 496535.536294892, 448246.178485261,
     123741.27252067, 186757.491613366, 354408.827465818, 319877.944093621,
     363284.968094093, 191744.545097374), tolerance = 1e-5)
-  expect_s3_class(ind, "data.frame")
+  expect_equal(ind$se_natural, c(34119.5010216887, 67987.7282245663, 
+    60432.8362168011, 19242.5241803067, 
+    28990.7319560472, 47539.6734588743, 44165.2634135574, 49344.1167299188, 
+    29289.6929311748), tolerance = 1e-4)
 
   indsp <- get_index_split(m, nd, nsplit = 2, bias_correct = FALSE)
   expect_equal(ind, indsp)
@@ -66,6 +70,76 @@ test_that("get_index works", {
   ind <- get_index(predictions2, bias_correct = FALSE)
   indsp <- get_index_split(m2, nd2, nsplit = 2, predict_args = list(offset = fake_offset), bias_correct = FALSE)
   expect_equal(ind, indsp)
+})
+
+test_that("get_index() can override the derived response link for cloglog binomial models", {
+  skip_on_cran()
+
+  set.seed(1)
+  n_trials <- 10
+  d <- expand.grid(time = 1:2, station = seq_len(60))
+  eta <- c(-1.2, -0.5)[d$time]
+  p <- 1 - exp(-exp(eta))
+  d$successes <- stats::rbinom(nrow(d), size = n_trials, prob = p)
+  d$prop <- d$successes / n_trials
+  d$trials <- n_trials
+
+  m <- sdmTMB(
+    prop ~ 0 + as.factor(time),
+    data = d,
+    family = binomial(link = "cloglog"),
+    weights = d$trials,
+    spatial = "off",
+    spatiotemporal = "off",
+    time = "time"
+  )
+
+  nd <- data.frame(time = 1:2)
+  pred <- predict(m, newdata = nd, return_tmb_object = TRUE)
+
+  idx_default <- get_index(pred, area = n_trials, bias_correct = FALSE)
+  idx_log <- get_index(pred, area = n_trials, bias_correct = FALSE, derived_link = "log")
+  expect_equal(idx_default$est, binomial(link = "cloglog")$linkinv(pred$data$est) * n_trials)
+  expect_equal(idx_log$est, exp(pred$data$est) * n_trials)
+
+  idx_split <- get_index_split(
+    m, nd,
+    nsplit = 2,
+    area = rep(n_trials, nrow(nd)),
+    bias_correct = FALSE,
+    derived_link = "log"
+  )
+  expect_equal(idx_log, idx_split)
+
+  m_do_index <- sdmTMB(
+    prop ~ 0 + as.factor(time),
+    data = d,
+    family = binomial(link = "cloglog"),
+    weights = d$trials,
+    spatial = "off",
+    spatiotemporal = "off",
+    time = "time",
+    do_index = TRUE,
+    predict_args = list(newdata = nd),
+    index_args = list(area = n_trials, derived_link = "log")
+  )
+  idx_fit <- get_index(m_do_index, bias_correct = FALSE)
+  expect_equal(idx_fit$est, idx_log$est)
+
+  m_do_index_default <- sdmTMB(
+    prop ~ 0 + as.factor(time),
+    data = d,
+    family = binomial(link = "cloglog"),
+    weights = d$trials,
+    spatial = "off",
+    spatiotemporal = "off",
+    time = "time",
+    do_index = TRUE,
+    predict_args = list(newdata = nd),
+    index_args = list(area = n_trials)
+  )
+  idx_fit_override <- get_index(m_do_index_default, bias_correct = FALSE, derived_link = "log")
+  expect_equal(idx_fit_override$est, idx_log$est)
 })
 
 test_that("get_cog works with subsets of years", {

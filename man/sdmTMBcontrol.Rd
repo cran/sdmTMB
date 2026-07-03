@@ -24,6 +24,8 @@ sdmTMBcontrol(
   suppress_nlminb_warnings = TRUE,
   collapse_spatial_variance = FALSE,
   collapse_threshold = 0.01,
+  sar_weight_style = c("row", "raw"),
+  get_rsr = FALSE,
   ...
 )
 }
@@ -46,7 +48,7 @@ try increasing this to \code{2}.}
 \item{newton_loops}{How many Newton optimization steps to try after running
 \code{\link[stats:nlminb]{stats::nlminb()}}. This sometimes aids convergence by further reducing the
 log-likelihood gradient with respect to the fixed effects. This calculates
-the Hessian at the current MLE with \code{\link[stats:optim]{stats::optimHess()}} using a
+the Hessian at the current MLE with \code{\link[stats:optimHess]{stats::optimHess()}} using a
 finite-difference approach and uses this to update the fixed effect
 estimates.}
 
@@ -73,15 +75,15 @@ fixed value.}
 \item{lower}{An optional named list of lower bounds within the optimization.
 Parameter vectors with the same name (e.g., \code{b_j} or \code{ln_kappa} in some
 cases) can be specified as a numeric vector. E.g.
-\code{lower = list(b_j = c(-5, -5))}. Note that \code{\link[stats:optim]{stats::optimHess()}} does not
+\code{lower = list(b_j = c(-5, -5))}. Note that \code{\link[stats:optimHess]{stats::optimHess()}} does not
 implement lower and upper bounds, so you must set \code{newton_loops = 0} if
 setting limits.}
 
 \item{upper}{An optional named list of upper bounds within the optimization.}
 
 \item{censored_upper}{An optional vector of upper bounds for
-\code{\link[=sdmTMBcontrol]{sdmTMBcontrol()}}. Values of \code{NA} indicate an unbounded right-censored to
-distribution, values greater that the observation indicate and upper bound,
+\code{\link[=sdmTMBcontrol]{sdmTMBcontrol()}}. Values of \code{NA} indicate an unbounded right-censored
+distribution, values greater than the observation indicate an upper bound,
 and values equal to the observation indicate no censoring.}
 
 \item{multiphase}{Logical: estimate the fixed and random effects in phases?
@@ -95,7 +97,7 @@ experimental at this stage.}}
 
 \item{get_joint_precision}{Logical. Passed to \code{getJointPrecision} in
 \code{\link[TMB:sdreport]{TMB::sdreport()}}. Must be \code{TRUE} to use simulation-based methods in
-\code{\link[=predict.sdmTMB]{predict.sdmTMB()}} or \verb{[get_index_sims()]}. If not needed, setting this
+\code{\link[=predict.sdmTMB]{predict.sdmTMB()}} or \code{\link[=get_index_sims]{get_index_sims()}}. If not needed, setting this to
 \code{FALSE} will reduce object size.}
 
 \item{parallel}{Argument currently ignored. For parallel processing with 3
@@ -111,23 +113,33 @@ are then replaced with \code{Inf} and avoided during estimation?}
 random fields be automatically dropped if their estimated standard deviation
 is effectively zero (i.e., below \code{collapse_threshold})? This helps prevent
 overfitting and numerical instability when the data provide little evidence
-for spatial or spatiotemporal variation. I.e., when the variance parameter is
+for spatial or spatiotemporal variation, i.e., when the variance parameter is
 estimated on or near the boundary of zero. When enabled, the model will be
 automatically refitted via \code{\link[=update.sdmTMB]{update.sdmTMB()}} with the corresponding field(s)
 disabled. This adds a computational cost (a single model refit if
 collapsing occurs) but can yield a simpler, more stable model and more
-reliable inference. Default is \code{FALSE} for backwards compatibility.}
+reliable inference. Default is \code{FALSE} for backward compatibility.}
 
 \item{collapse_threshold}{Numeric: the standard deviation threshold below which random
 fields are considered to be collapsing to zero. Only used when
 \code{collapse_spatial_variance = TRUE}. Values are on the standard deviation
 scale (i.e., square root of variance). Default is 0.01.}
 
+\item{sar_weight_style}{Weight matrix to use for areal SAR models. \code{"row"}
+uses row-normalized weights and is the default. \code{"raw"} uses the raw
+adjacency/weight matrix for direct comparisons to packages that do so.}
+
+\item{get_rsr}{Experimental option, whether to calculate the restricted
+spatial regression (RSR) adjusted estimator for covariate responses. If
+\code{get_rsr = TRUE}, these will be available via
+\code{tidy(fit, effects = "rsr")}. See Hanks et al. (2015) and
+Diaz and Thorson (2025).}
+
 \item{...}{Anything else. See the 'Control parameters' section of
 \code{\link[stats:nlminb]{stats::nlminb()}}.}
 }
 \value{
-A list of control arguments
+A list of control arguments.
 }
 \description{
 \code{\link[=sdmTMB]{sdmTMB()}} and \code{\link[stats:nlminb]{stats::nlminb()}} control options.
@@ -140,4 +152,16 @@ Usually used within \code{\link[=sdmTMB]{sdmTMB()}}. For example:
 }
 \examples{
 sdmTMBcontrol()
+}
+\references{
+Restricted Spatial Regression (\code{get_rsr}):
+
+Diaz, R.R., and Thorson, J.T. 2025. When and How to Use Restricted Spatial
+Regression to Separate Environmental Effects from Spatial Confounding.
+EcoEvoRxiv. \doi{10.32942/X28351}.
+
+Hanks, E.M., Schliep, E.M., Hooten, M.B., and Hoeting, J.A. 2015. Restricted
+spatial regression in practice: geostatistical models, confounding, and
+robustness under model misspecification. Environmetrics 26(4): 243--254.
+\doi{10.1002/env.2331}.
 }

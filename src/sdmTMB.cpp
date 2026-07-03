@@ -2,6 +2,7 @@
 #define EIGEN_DONT_PARALLELIZE
 #include <TMB.hpp>
 #include "utils.h"
+#include "covariate-diffusion.h"
 // #include <omp.h>
 
 enum valid_family {
@@ -164,6 +165,8 @@ Type objective_function<Type>::operator()()
   DATA_VECTOR(proj_offset_i); // optional offset
 
   DATA_INTEGER(n_t);  // number of years
+  // Covariate-diffusion metadata and vertex-by-time covariate arrays.
+  DATA_STRUCT(covariate_diffusion, sdmTMB::covariate_diffusion_data_t);
 
   // Random effects
   DATA_IMATRIX(re_cov_df); // dataframe describing the random effects covariance parameters
@@ -177,6 +180,8 @@ Type objective_function<Type>::operator()()
 
   DATA_SPARSE_MATRIX(A_st); // INLA 'A' projection matrix for unique stations
   DATA_IVECTOR(A_spatial_index); // Vector of stations to match up A_st output
+  DATA_INTEGER(spatial_model); // 0 = SPDE, 1 = areal SAR, 2 = areal CAR
+  DATA_SPARSE_MATRIX(W_ss); // areal weights matrix: row-normalized SAR or raw CAR adjacency
 
   // Indices for factors
   DATA_FACTOR(year_i);
@@ -187,6 +192,8 @@ Type objective_function<Type>::operator()()
 
   // Prediction?
   DATA_INTEGER(do_predict);
+  // Restricted Spatial Regression report?
+  DATA_INTEGER(do_rsr);
   // With standard errors on the full projections?
   DATA_INTEGER(calc_se);
   // Should predictions be population (vs. individual-level) predictions?
@@ -219,6 +226,7 @@ Type objective_function<Type>::operator()()
   // Distribution
   DATA_IVECTOR(family);
   DATA_IVECTOR(link);
+  DATA_IVECTOR(link_pred);
   DATA_VECTOR(size); // binomial, via glmmTMB
 
   // SPDE objects from R-INLA
@@ -276,6 +284,8 @@ Type objective_function<Type>::operator()()
   PARAMETER_ARRAY(ln_tau_Z);    // optional spatially varying covariate process
   PARAMETER_VECTOR(ln_tau_E);    // spatio-temporal process
   PARAMETER_ARRAY(ln_kappa);    // Matern parameter
+  PARAMETER_VECTOR(log_kappaS_nl);    // covariate diffusion spatial scale
+  PARAMETER_VECTOR(kappaT_nl_raw);    // covariate diffusion temporal scale
 
   PARAMETER(thetaf);           // tweedie only
   PARAMETER(ln_student_df);    // student-t df (log(df - 1))
@@ -287,6 +297,7 @@ Type objective_function<Type>::operator()()
   PARAMETER_ARRAY(ln_tau_V);  // random walk sigma
   PARAMETER_ARRAY(rho_time_unscaled); // (k, m) dimension ar1 time correlation rho -Inf to Inf
   PARAMETER_VECTOR(ar1_phi);          // AR1 fields correlation
+  PARAMETER_VECTOR(logit_rho_sar);    // areal dependence parameter
 
   // Random effects
   PARAMETER_ARRAY(re_cov_pars); // covariance parameters for random slopes/intercepts
@@ -327,46 +338,85 @@ Type objective_function<Type>::operator()()
   // DELTA DONE
   vector<Type> rho(n_m);
   for (int m = 0; m < n_m; m++) rho(m) = sdmTMB::minus_one_to_one(ar1_phi(m));
+  vector<Type> rho_sar(logit_rho_sar.size());
+  vector<Type> alpha_car(logit_rho_sar.size());
+  for (int m = 0; m < logit_rho_sar.size(); m++) {
+    rho_sar(m) = sdmTMB::minus_one_to_one(logit_rho_sar(m));
+    alpha_car(m) = invlogit(logit_rho_sar(m));
+  }
   vector<Type> phi = exp(ln_phi);
+
+  // Covariate diffusion
+  // Transform distributed-lag parameters onto the scales used by the solvers
+  if (log_kappaS_nl.size() != covariate_diffusion.n_covariates ||
+      kappaT_nl_raw.size() != covariate_diffusion.n_covariates) {
+    error("Nonlocal parameter vectors must have length `covariate_diffusion.n_covariates`.");
+  }
+  vector<Type> kappaS_nl_by_covariate(covariate_diffusion.n_covariates);
+  vector<Type> kappaT_nl_by_covariate(covariate_diffusion.n_covariates);
+  kappaS_nl_by_covariate.setZero();
+  kappaT_nl_by_covariate.setZero();
+  for (int cov_i = 0; cov_i < covariate_diffusion.n_covariates; cov_i++) {
+    if (covariate_diffusion.has(cov_i, sdmTMB::nl_space) == 1) {
+      kappaS_nl_by_covariate(cov_i) = exp(log_kappaS_nl(cov_i));
+    }
+    if (covariate_diffusion.has(cov_i, sdmTMB::nl_time) == 1) {
+      kappaT_nl_by_covariate(cov_i) = kappaT_nl_raw(cov_i);
+    }
+  }
 
   // ------------------ Geospatial ---------------------------------------------
 
   // DELTA DONE
   // Matern:
-  array<Type> range(2,n_m);
-  for (int m = 0; m < n_m; m++) {
-    for (int r = 0; r < 2; r++) {
-      range(r,m) = sqrt(Type(8.)) / exp(ln_kappa(r,m));
+  tmbutils::array<Type> range(2,n_m);
+  range.setZero();
+  if (spatial_model == 0) {
+    for (int m = 0; m < n_m; m++) {
+      for (int r = 0; r < 2; r++) {
+        range(r,m) = sqrt(Type(8.)) / exp(ln_kappa(r,m));
+      }
     }
   }
 
   // DELTA DONE
-  array<Type> sigma_O(1,n_m); // array b/c ADREPORT crashes if vector elements mapped
-  array<Type> log_sigma_O(1,n_m); // array b/c ADREPORT crashes if vector elements mapped
+  tmbutils::array<Type> sigma_O(1,n_m); // array b/c ADREPORT crashes if vector elements mapped
+  tmbutils::array<Type> log_sigma_O(1,n_m); // array b/c ADREPORT crashes if vector elements mapped
+  sigma_O.setZero();
+  log_sigma_O.setZero();
   int n_z = ln_tau_Z.rows();
-  array<Type> sigma_Z(n_z, n_m);
-  array<Type> log_sigma_Z(n_z,n_m); // for SE
+  tmbutils::array<Type> sigma_Z(n_z, n_m);
+  tmbutils::array<Type> log_sigma_Z(n_z,n_m); // for SE
+  sigma_Z.setZero();
+  log_sigma_Z.setZero();
   for (int m = 0; m < n_m; m++) {
     if (include_spatial(m)) {
-      sigma_O(0,m) = sdmTMB::calc_rf_sigma(ln_tau_O(m), ln_kappa(0,m));
+      if (spatial_model == 0) {
+        sigma_O(0,m) = sdmTMB::calc_rf_sigma(ln_tau_O(m), ln_kappa(0,m));
+      } else {
+        sigma_O(0,m) = Type(1.) / exp(ln_tau_O(m));
+      }
       log_sigma_O(0,m) = log(sigma_O(0,m));
     }
     if (spatial_covariate) {
       for (int z = 0; z < n_z; z++) {
-        sigma_Z(z,m) = sdmTMB::calc_rf_sigma(ln_tau_Z(z,m), ln_kappa(0,m));
+        if (spatial_model == 0) {
+          sigma_Z(z,m) = sdmTMB::calc_rf_sigma(ln_tau_Z(z,m), ln_kappa(0,m));
+        } else {
+          sigma_Z(z,m) = Type(1.) / exp(ln_tau_Z(z,m));
+        }
       }
-    for (int z = 0; z < n_z; z++)
-      for (int m = 0; m < n_m; m++)
-        log_sigma_Z(z,m) = log(sigma_Z(z,m));
     }
   }
+  for (int z = 0; z < n_z; z++)
+    for (int m = 0; m < n_m; m++)
+      log_sigma_Z(z,m) = log(sigma_Z(z,m));
   REPORT(sigma_Z);
   ADREPORT(sigma_Z);
   ADREPORT(log_sigma_Z);
   REPORT(sigma_O);
   ADREPORT(sigma_O);
   ADREPORT(log_sigma_O);
-  ADREPORT(log_sigma_Z);
 
   // TODO can we not always run this for speed?
   //vector<Type> sigma_E(n_m);
@@ -375,12 +425,16 @@ Type objective_function<Type>::operator()()
   //}
 
   // optional non-stationary model on epsilon
-  array<Type> sigma_E(n_t, n_m);
-  array<Type> ln_tau_E_vec(n_t, n_m);
+  tmbutils::array<Type> sigma_E(n_t, n_m);
+  tmbutils::array<Type> ln_tau_E_vec(n_t, n_m);
   if (!est_epsilon_model) { // constant model
     for (int m = 0; m < n_m; m++) {
       // do calculation once,
-      sigma_E(0,m) = sdmTMB::calc_rf_sigma(ln_tau_E(m), ln_kappa(1,m));
+      if (spatial_model == 0) {
+        sigma_E(0,m) = sdmTMB::calc_rf_sigma(ln_tau_E(m), ln_kappa(1,m));
+      } else {
+        sigma_E(0,m) = Type(1.) / exp(ln_tau_E(m));
+      }
       ln_tau_E_vec(0,m) = ln_tau_E(m);
       for (int i = 1; i < n_t; i++) {
         sigma_E(i,m) = sigma_E(0,m);
@@ -392,8 +446,9 @@ Type objective_function<Type>::operator()()
     // epsilon_intcpt is the intercept parameter, derived from ln_tau_E.
     // For models with time as covariate, this is interpreted as sigma when covariate = 0.
     for (int m = 0; m < n_m; m++) {
-
-      Type epsilon_intcpt = sdmTMB::calc_rf_sigma(ln_tau_E(m), ln_kappa(1,m));
+      Type epsilon_intcpt = spatial_model == 0 ?
+        sdmTMB::calc_rf_sigma(ln_tau_E(m), ln_kappa(1,m)) :
+        Type(1.) / exp(ln_tau_E(m));
       Type log_epsilon_intcpt = log(epsilon_intcpt);
       Type log_epsilon_temp = 0.0;
       Type epsilon_cnst = - log(Type(4.0) * M_PI) / Type(2.0) - ln_kappa(1,m);
@@ -409,11 +464,15 @@ Type objective_function<Type>::operator()()
         if (est_epsilon_slope) log_epsilon_temp += b_epsilon(m) * epsilon_predictor(i);
         if (est_epsilon_re) log_epsilon_temp += epsilon_re(i,m);
         sigma_E(i,m) = exp(log_epsilon_temp); // log-linear model
-        ln_tau_E_vec(i,m) = -log_epsilon_temp + epsilon_cnst;
+        if (spatial_model == 0) {
+          ln_tau_E_vec(i,m) = -log_epsilon_temp + epsilon_cnst;
+        } else {
+          ln_tau_E_vec(i,m) = -log_epsilon_temp;
+        }
       }
     }
   }
-  array<Type> log_sigma_E(sigma_E.rows(),sigma_E.cols()); // for SE
+  tmbutils::array<Type> log_sigma_E(sigma_E.rows(),sigma_E.cols()); // for SE
   log_sigma_E.setZero();
   for (int i = 0; i < sigma_E.rows(); i++) {
     for (int m = 0; m < sigma_E.cols(); m++) {
@@ -429,33 +488,47 @@ Type objective_function<Type>::operator()()
   Eigen::SparseMatrix<Type> Q_s2; // Precision matrix
   Eigen::SparseMatrix<Type> Q_st2; // Precision matrix
 
-  if (barrier) {
-    Q_s = sdmTMB::Q_spde_inlaspacetime(spde_barrier, ln_kappa(0,0), barrier_scaling);
-    if (n_m > 1) Q_s2 = sdmTMB::Q_spde_inlaspacetime(spde_barrier, ln_kappa(0,1), barrier_scaling);
-    if (!share_range(0)) Q_st = sdmTMB::Q_spde_inlaspacetime(spde_barrier, ln_kappa(1,0), barrier_scaling);
-    if (!share_range(1) && n_m > 1) Q_st2 = sdmTMB::Q_spde_inlaspacetime(spde_barrier, ln_kappa(1,1), barrier_scaling);
-  } else {
-    if (anisotropy) {
-      matrix<Type> H = sdmTMB::MakeH(vector<Type>(ln_H_input.col(0)));
-      Q_s = R_inla::Q_spde(spde_aniso, exp(ln_kappa(0,0)), H);
-      if (!share_range(0)) Q_st = R_inla::Q_spde(spde_aniso, exp(ln_kappa(1,0)), H);
-      REPORT(H);
-      if (n_m > 1) {
-        matrix<Type> H2 = sdmTMB::MakeH(vector<Type>(ln_H_input.col(1)));
-        Q_s2 = R_inla::Q_spde(spde_aniso, exp(ln_kappa(0,1)), H2);
-        if (!share_range(1)) Q_st2 = R_inla::Q_spde(spde_aniso, exp(ln_kappa(1,1)), H2);
-        REPORT(H2);
+  if (spatial_model == 0) {
+    if (barrier) {
+      Q_s = sdmTMB::Q_spde_inlaspacetime(spde_barrier, ln_kappa(0,0), barrier_scaling);
+      if (n_m > 1) Q_s2 = sdmTMB::Q_spde_inlaspacetime(spde_barrier, ln_kappa(0,1), barrier_scaling);
+      if (!share_range(0)) Q_st = sdmTMB::Q_spde_inlaspacetime(spde_barrier, ln_kappa(1,0), barrier_scaling);
+      if (!share_range(1) && n_m > 1) Q_st2 = sdmTMB::Q_spde_inlaspacetime(spde_barrier, ln_kappa(1,1), barrier_scaling);
+    } else {
+      if (anisotropy) {
+        matrix<Type> H = sdmTMB::MakeH(vector<Type>(ln_H_input.col(0)));
+        Q_s = R_inla::Q_spde(spde_aniso, exp(ln_kappa(0,0)), H);
+        if (!share_range(0)) Q_st = R_inla::Q_spde(spde_aniso, exp(ln_kappa(1,0)), H);
+        REPORT(H);
+        if (n_m > 1) {
+          matrix<Type> H2 = sdmTMB::MakeH(vector<Type>(ln_H_input.col(1)));
+          Q_s2 = R_inla::Q_spde(spde_aniso, exp(ln_kappa(0,1)), H2);
+          if (!share_range(1)) Q_st2 = R_inla::Q_spde(spde_aniso, exp(ln_kappa(1,1)), H2);
+          REPORT(H2);
+        }
+      }
+      if (!anisotropy) {
+        Q_s = R_inla::Q_spde(spde, exp(ln_kappa(0,0)));
+        if (!share_range(0)) Q_st = R_inla::Q_spde(spde, exp(ln_kappa(1,0)));
+        if (n_m > 1) Q_s2 = R_inla::Q_spde(spde, exp(ln_kappa(0,1)));
+        if (!share_range(1) && n_m > 1) Q_st2 = R_inla::Q_spde(spde, exp(ln_kappa(1,1)));
       }
     }
-    if (!anisotropy) {
-      Q_s = R_inla::Q_spde(spde, exp(ln_kappa(0,0)));
-      if (!share_range(0)) Q_st = R_inla::Q_spde(spde, exp(ln_kappa(1,0)));
-      if (n_m > 1) Q_s2 = R_inla::Q_spde(spde, exp(ln_kappa(0,1)));
-      if (!share_range(1) && n_m > 1) Q_st2 = R_inla::Q_spde(spde, exp(ln_kappa(1,1)));
+    if (share_range(0)) Q_st = Q_s;
+    if (share_range(1)) Q_st2 = Q_s2;
+  } else if (spatial_model == 1) {
+    Q_s = Q_st = sdmTMB::Q_SAR(rho_sar(0), W_ss);
+    if (n_m > 1) {
+      Q_s2 = Q_st2 = sdmTMB::Q_SAR(rho_sar(1), W_ss);
     }
+  } else if (spatial_model == 2) {
+    Q_s = Q_st = sdmTMB::Q_CAR(alpha_car(0), W_ss);
+    if (n_m > 1) {
+      Q_s2 = Q_st2 = sdmTMB::Q_CAR(alpha_car(1), W_ss);
+    }
+  } else {
+    error("Spatial model not implemented.");
   }
-  if (share_range(0)) Q_st = Q_s;
-  if (share_range(1)) Q_st2 = Q_s2;
 
   bool s = true;
   if (normalize_in_r) s = false;
@@ -559,7 +632,7 @@ Type objective_function<Type>::operator()()
           // Penalty to match TMB AR1_t() implementation:
           PARALLEL_REGION jnll += Type((n_cols - 1.) * n_rows) * log(sqrt(1. - rho(m) * rho(m)));
           if (sim_re(1)) {
-            // array<Type> epsilon_st_tmp(epsilon_st.col(m).rows(),n_t);
+            // tmbutils::array<Type> epsilon_st_tmp(epsilon_st.col(m).rows(),n_t);
             // SIMULATE {SEPARABLE(AR1(rho(m)), GMRF(Q_temp, s)).simulate(epsilon_st_tmp);
             //   epsilon_st.col(m) = epsilon_st_tmp / exp(ln_tau_E(m));}
             for (int t = 0; t < n_t; t++) {
@@ -675,10 +748,10 @@ Type objective_function<Type>::operator()()
   REPORT(re_b_pars);
   ADREPORT(re_b_pars);
 
-  array<Type> sigma_V(X_rw_ik.cols(),n_m);
+  tmbutils::array<Type> sigma_V(X_rw_ik.cols(),n_m);
   // Time-varying effects (dynamic regression):
   if (random_walk == 1 || ar1_time || random_walk == 2) {
-    array<Type> rho_time(X_rw_ik.cols(), n_m);
+    tmbutils::array<Type> rho_time(X_rw_ik.cols(), n_m);
     rho_time.setZero();
     for (int m = 0; m < n_m; m++) {
       for (int k = 0; k < X_rw_ik.cols(); k++) {
@@ -740,10 +813,10 @@ Type objective_function<Type>::operator()()
 
   // Here we are projecting the spatiotemporal and spatial random effects to the
   // locations of the data using the INLA 'A' matrices.
-  array<Type> omega_s_A(n_i, n_m);
-  array<Type> zeta_s_A(n_i, n_z, n_m);
-  array<Type> epsilon_st_A(n_i, n_t, n_m);
-  array<Type> epsilon_st_A_vec(n_i, n_m);
+  tmbutils::array<Type> omega_s_A(n_i, n_m);
+  tmbutils::array<Type> zeta_s_A(n_i, n_z, n_m);
+  tmbutils::array<Type> epsilon_st_A(n_i, n_t, n_m);
+  tmbutils::array<Type> epsilon_st_A_vec(n_i, n_m);
   omega_s_A.setZero();
   zeta_s_A.setZero();
   epsilon_st_A.setZero();
@@ -762,20 +835,51 @@ Type objective_function<Type>::operator()()
 
   // ------------------ Linear predictor ---------------------------------------
 
-  array<Type> eta_fixed_i(n_i, n_m);
+  tmbutils::array<Type> eta_fixed_i(n_i, n_m);
   for (int m = 0; m < n_m; m++) {
     if (m == 0) eta_fixed_i.col(m) = X_ij(m) * b_j;
     if (m == 1) eta_fixed_i.col(m) = X_ij(m) * b_j2;
   }
 
+  // Covariate diffusion
+  // Add transformed covariate-diffusion columns to the fixed-effect predictor.
+  matrix<Type> covariate_diffusion_values(n_i, covariate_diffusion.n_terms);
+  auto add_nl_obs_for_model = [&](const vector<Type>& b_model, int model_col) {
+    sdmTMB::CovariateDiffusionContext<Type> nl_ctx = {
+      covariate_diffusion.n_terms,
+      covariate_diffusion.n_covariates,
+      n_i,
+      n_t,
+      covariate_diffusion.term_component,
+      covariate_diffusion.term_covariate,
+      covariate_diffusion.covariate_vertex_time,
+      A_st,
+      A_spatial_index,
+      year_i,
+      spde.M0,
+      spde.M1,
+      kappaS_nl_by_covariate,
+      kappaT_nl_by_covariate,
+      b_model,
+      model_col
+    };
+    // The diffused term values themselves don't depend on which model's
+    // coefficients are used, so only capture them once.
+    sdmTMB::add_covariate_diffusion_to_eta_fixed(
+      eta_fixed_i, nl_ctx, model_col == 0 ? &covariate_diffusion_values : nullptr);
+  };
+  add_nl_obs_for_model(b_j, 0);
+  if (n_m > 1) add_nl_obs_for_model(b_j2, 1);
+  REPORT(covariate_diffusion_values);
+
   // FIXME delta must be same in 2 components:
   // p-splines/smoothers
-  array<Type> eta_smooth_i(n_i, n_m);
+  tmbutils::array<Type> eta_smooth_i(n_i, n_m);
   eta_smooth_i.setZero();
   if (has_smooths) {
     for (int m = 0; m < n_m; m++) {
       for (int s = 0; s < b_smooth_start.size(); s++) { // iterate over # of smooth elements
-        array<Type> beta_s(Zs(s).cols(),n_m);
+        tmbutils::array<Type> beta_s(Zs(s).cols(),n_m);
         beta_s.setZero();
         for (int j = 0; j < beta_s.rows(); j++) {
           beta_s(j,m) = b_smooth(b_smooth_start(s) + j,m);
@@ -1220,17 +1324,92 @@ Type objective_function<Type>::operator()()
     }
   }
 
+  // ------------------ Restricted Spatial Regression --------------------------
+  // Hanks et al. (2015) doi:10.1002/env.2331 -- post-hoc adjustment of the
+  // fixed-effect coefficients for spatial confounding with the random fields.
+  // Implemented as done in tinyVAST by J.T. Thorson.
+
+  if (do_rsr) {
+    vector<Type> b_j_prime(b_j.size());
+    vector<Type> b_j2_prime(b_j2.size());
+    b_j_prime.setZero();
+    b_j2_prime.setZero();
+    for (int m = 0; m < n_m; m++) {
+      matrix<Type> X_ij_transpose = X_ij(m).transpose();
+      matrix<Type> covX_jj = X_ij_transpose * X_ij(m);
+      matrix<Type> precisionX_jj = atomic::matinv(covX_jj);
+      // Sum all spatial effects at observation locations to match how they
+      // enter the linear predictor:
+      vector<Type> total_rf = vector<Type>(omega_s_A.col(m)) +
+                              vector<Type>(epsilon_st_A_vec.col(m));
+      for (int z = 0; z < n_z; z++) {
+        for (int i = 0; i < n_i; i++) {
+          total_rf(i) += zeta_s_A(i,z,m) * z_i(i,z);
+        }
+      }
+      vector<Type> b_prime_tmp;
+      if (m == 0) {
+        b_prime_tmp = b_j +
+          (precisionX_jj * X_ij_transpose * total_rf.matrix()).array();
+        b_j_prime = b_prime_tmp;
+      } else {
+        b_prime_tmp = b_j2 +
+          (precisionX_jj * X_ij_transpose * total_rf.matrix()).array();
+        b_j2_prime = b_prime_tmp;
+      }
+    }
+    REPORT(b_j_prime);
+    ADREPORT(b_j_prime);
+    if (n_m > 1) {
+      REPORT(b_j2_prime);
+      ADREPORT(b_j2_prime);
+    }
+  }
+
   // ------------------ Predictions on new data --------------------------------
 
   if (do_predict) {
     int n_p = proj_X_ij(0).rows(); // n 'p'redicted newdata
     int n_p_mesh = proj_mesh.rows(); // n 'p'redicted mesh (less than n_p if duplicate locations)
-    array<Type> proj_fe(n_p, n_m);
+    tmbutils::array<Type> proj_fe(n_p, n_m);
 
     for (int m = 0; m < n_m; m++) {
       if (m == 0) proj_fe.col(m) = proj_X_ij(m) * b_j;
+      if (m == 1) proj_fe.col(m) = proj_X_ij(m) * b_j2;
+    }
+
+    // Repeat the diffusion transform for prediction data before adding offsets.
+    matrix<Type> proj_covariate_diffusion_values(n_p, covariate_diffusion.n_terms);
+    auto add_nl_proj_for_model = [&](const vector<Type>& b_model, int model_col) {
+      sdmTMB::CovariateDiffusionContext<Type> nl_ctx = {
+        covariate_diffusion.n_terms,
+        covariate_diffusion.n_covariates,
+        n_p,
+        n_t,
+        covariate_diffusion.term_component,
+        covariate_diffusion.term_covariate,
+        covariate_diffusion.proj_covariate_vertex_time,
+        proj_mesh,
+        proj_spatial_index,
+        proj_year,
+        spde.M0,
+        spde.M1,
+        kappaS_nl_by_covariate,
+        kappaT_nl_by_covariate,
+        b_model,
+        model_col
+      };
+      // The diffused term values themselves don't depend on which model's
+      // coefficients are used, so only capture them once.
+      sdmTMB::add_covariate_diffusion_to_eta_fixed(
+        proj_fe, nl_ctx, model_col == 0 ? &proj_covariate_diffusion_values : nullptr);
+    };
+    add_nl_proj_for_model(b_j, 0);
+    if (n_m > 1) add_nl_proj_for_model(b_j2, 1);
+    REPORT(proj_covariate_diffusion_values);
+    for (int m = 0; m < n_m; m++) {
       if (n_m == 1) proj_fe.col(m) += proj_offset_i;
-      if (m == 1) proj_fe.col(m) = proj_X_ij(m) * b_j2 + proj_offset_i;
+      if (m == 1) proj_fe.col(m) += proj_offset_i;
     }
 
     // add threshold effect if specified
@@ -1255,12 +1434,12 @@ Type objective_function<Type>::operator()()
     }
 
     // Smoothers:
-    array<Type> proj_smooth_i(n_p, n_m);
+    tmbutils::array<Type> proj_smooth_i(n_p, n_m);
     proj_smooth_i.setZero();
     if (has_smooths) {
       for (int m = 0; m < n_m; m++) {
         for (int s = 0; s < b_smooth_start.size(); s++) { // iterate over # of smooth elements
-          array<Type> beta_s(proj_Zs(s).cols(),n_m);
+          tmbutils::array<Type> beta_s(proj_Zs(s).cols(),n_m);
           beta_s.setZero();
           for (int j = 0; j < beta_s.rows(); j++) {
             beta_s(j,m) = b_smooth(b_smooth_start(s) + j,m);
@@ -1273,7 +1452,7 @@ Type objective_function<Type>::operator()()
     }
 
     // Random slopes and intercepts:
-    array<Type> proj_iid_re_i(n_p, n_m);
+    tmbutils::array<Type> proj_iid_re_i(n_p, n_m);
     proj_iid_re_i.setZero();
     if (!exclude_RE) {
       for (int m = 0; m < n_m; m++) {
@@ -1296,7 +1475,7 @@ Type objective_function<Type>::operator()()
     }
 
     // Random walk covariates:
-    array<Type> proj_rw_i(n_p,n_m);
+    tmbutils::array<Type> proj_rw_i(n_p,n_m);
     proj_rw_i.setZero();
     if (random_walk == 1 || ar1_time || random_walk == 2) {
       for (int m = 0; m < n_m; m++) {
@@ -1310,20 +1489,20 @@ Type objective_function<Type>::operator()()
     }
 
     // Spatial and spatiotemporal random fields (by unique location):
-    array<Type> proj_omega_s_A_unique(n_p_mesh, n_m);
-    array<Type> proj_zeta_s_A_unique(n_p_mesh, n_z, n_m);
-    array<Type> proj_epsilon_st_A_unique(n_p_mesh, n_t, n_m);
+    tmbutils::array<Type> proj_omega_s_A_unique(n_p_mesh, n_m);
+    tmbutils::array<Type> proj_zeta_s_A_unique(n_p_mesh, n_z, n_m);
+    tmbutils::array<Type> proj_epsilon_st_A_unique(n_p_mesh, n_t, n_m);
     proj_epsilon_st_A_unique.setZero();
 
     // Expanded to full length:
-    array<Type> proj_omega_s_A(n_p, n_m);
-    array<Type> proj_zeta_s_A(n_p, n_z, n_m);
-    array<Type> proj_epsilon_st_A_vec(n_p, n_m);
+    tmbutils::array<Type> proj_omega_s_A(n_p, n_m);
+    tmbutils::array<Type> proj_zeta_s_A(n_p, n_z, n_m);
+    tmbutils::array<Type> proj_epsilon_st_A_vec(n_p, n_m);
     proj_omega_s_A.setZero(); // may not get filled
     proj_zeta_s_A.setZero(); // may not get filled
     proj_epsilon_st_A_vec.setZero(); // may not get filled
 
-    array<Type> proj_zeta_s_A_cov(n_p, n_z, n_m);
+    tmbutils::array<Type> proj_zeta_s_A_cov(n_p, n_z, n_m);
     proj_zeta_s_A_cov.setZero();
 
     if (!no_spatial) {
@@ -1373,8 +1552,8 @@ Type objective_function<Type>::operator()()
     //   }
     // }
 
-    array<Type> proj_rf(n_p, n_m);
-    array<Type> proj_eta(n_p, n_m);
+    tmbutils::array<Type> proj_rf(n_p, n_m);
+    tmbutils::array<Type> proj_eta(n_p, n_m);
     for (int m = 0; m < n_m; m++)
       proj_rf.col(m) = proj_omega_s_A.col(m) + proj_epsilon_st_A_vec.col(m);
 
@@ -1473,7 +1652,6 @@ Type objective_function<Type>::operator()()
       PARAMETER_VECTOR(eps_index);
       Type t1;
       Type t2;
-      int link_tmp;
 
       for (int i = 0; i < n_p; i++) {
         if (n_m > 1) { // delta model
@@ -1492,26 +1670,21 @@ Type objective_function<Type>::operator()()
             t2 = InverseLink(proj_eta(i,1), link(1));
             mu_combined(i) = t1 * t2;
           }
-          total(proj_year(i)) += mu_combined(i) * area_i(i);
         } else { // non-delta model
           if (truncated_dist) {
             // convert from mean of *un-truncated* to mean of *truncated* distribution
             Type log_nzprob = calc_log_nzprob(exp(proj_eta(i,0)), phi(0), family(0));
             mu_combined(i) = exp(proj_eta(i,0)) / exp(log_nzprob);
           } else  {
-            mu_combined(i) = InverseLink(proj_eta(i,0), link(0));
+            mu_combined(i) = InverseLink(proj_eta(i,0), link_pred(0));
           }
-          total(proj_year(i)) += mu_combined(i) * area_i(i);
         }
+
+        total(proj_year(i)) += mu_combined(i) * area_i(i);
       }
       vector<Type> link_total(n_t);
-      if (n_m > 1) {
-        link_tmp = link(1); // 2nd link should always be log/exp in this case
-      } else {
-        link_tmp = link(0);
-      }
       for (int i = 0; i < n_t; i++) {
-        link_total(i) = Link(total(i), link_tmp);
+        link_total(i) = log(total(i));
       }
       if (calc_index_totals) {
         REPORT(link_total);
@@ -1586,27 +1759,6 @@ Type objective_function<Type>::operator()()
      REPORT(s_max);
      ADREPORT(s_max);
    }
-//    if (calc_quadratic_range && b_j(1) < Type(0)) {
-//      vector<Type> quadratic_roots = sdmTMB::GetQuadraticRoots(b_j(1), b_j(0), Type(0.05));
-//      Type quadratic_low = quadratic_roots(0);
-//      Type quadratic_hi = quadratic_roots(1);
-//      Type quadratic_range = quadratic_roots(1) - quadratic_roots(0);
-//      if (quadratic_range < 0) quadratic_range = quadratic_range * -1.;
-//      Type quadratic_peak = quadratic_roots(2);
-//      Type quadratic_reduction = quadratic_roots(3);
-//
-//      REPORT(quadratic_low);
-//      REPORT(quadratic_hi);
-//      REPORT(quadratic_range);
-//      REPORT(quadratic_peak);
-//      REPORT(quadratic_reduction);
-//
-//      ADREPORT(quadratic_low);
-//      ADREPORT(quadratic_hi);
-//      ADREPORT(quadratic_range);
-//      ADREPORT(quadratic_peak);
-//      ADREPORT(quadratic_reduction);
-//    }
    if (est_epsilon_slope) {
      REPORT(b_epsilon);
      ADREPORT(b_epsilon);
@@ -1619,19 +1771,60 @@ Type objective_function<Type>::operator()()
   //  // ------------------ Reporting ----------------------------------------------
   // FIXME save memory by not reporting all these or optionally so for MVN/Bayes?
 
+  if (spatial_model == 1) {
+    REPORT(rho_sar);
+    ADREPORT(rho_sar);
+  }
+  if (spatial_model == 2) {
+    REPORT(alpha_car);
+    ADREPORT(alpha_car);
+  }
   if (!no_spatial) {
-    array<Type> log_range(range.rows(),range.cols()); // for SE
+    REPORT(rho);          // AR1 correlation in -1 to 1 space
+  }
+  if (!no_spatial && spatial_model == 0) {
+    tmbutils::array<Type> log_range(range.rows(),range.cols()); // for SE
     log_range.setZero();
     for (int i = 0; i < range.rows(); i++) {
       for (int m = 0; m < range.cols(); m++) {
         log_range(i,m) = log(range(i,m));
       }
     }
-    REPORT(rho);          // AR1 correlation in -1 to 1 space
     REPORT(range);        // Matern approximate distance at 10% correlation
     ADREPORT(range);        // Matern approximate distance at 10% correlation
     REPORT(log_range);  // log Matern approximate distance at 10% correlation
     ADREPORT(log_range);  // log Matern approximate distance at 10% correlation
+  }
+  if (covariate_diffusion.n_terms > 0) {
+    // Report only summaries for components present in the fitted diffusion terms.
+    int n_S = 0, n_T = 0;
+    for (int i = 0; i < covariate_diffusion.n_covariates; i++) {
+      if (covariate_diffusion.has(i, sdmTMB::nl_space) == 1) n_S++;
+      if (covariate_diffusion.has(i, sdmTMB::nl_time) == 1)      n_T++;
+    }
+    vector<Type> kappaS_nl(n_S), kappaT_nl(n_T);
+    vector<Type> rhoT(n_T), MSD(n_S), RMSD(n_S);
+    int iS = 0, iT = 0;
+    for (int i = 0; i < covariate_diffusion.n_covariates; i++) {
+      if (covariate_diffusion.has(i, sdmTMB::nl_time) == 1) {
+        kappaT_nl(iT) = kappaT_nl_by_covariate(i);
+        rhoT(iT) = kappaT_nl_by_covariate(i) / (Type(1.0) + kappaT_nl_by_covariate(i));
+        iT++;
+      }
+      if (covariate_diffusion.has(i, sdmTMB::nl_space) == 1) {
+        kappaS_nl(iS) = kappaS_nl_by_covariate(i);
+        Type m = Type(4.0) / (kappaS_nl_by_covariate(i) * kappaS_nl_by_covariate(i));
+        if (covariate_diffusion.has(i, sdmTMB::nl_time) == 1) {
+          Type r = kappaT_nl_by_covariate(i) / (Type(1.0) + kappaT_nl_by_covariate(i));
+          m = m * (Type(1.0) - r);
+        }
+        MSD(iS) = m;
+        RMSD(iS) = sqrt(m);
+        iS++;
+      }
+    }
+    if (n_S > 0)  { REPORT(kappaS_nl);  ADREPORT(kappaS_nl); REPORT(MSD); REPORT(RMSD); ADREPORT(MSD); ADREPORT(RMSD); }
+    if (n_T > 0)  { REPORT(kappaT_nl);  ADREPORT(kappaT_nl); REPORT(rhoT); ADREPORT(rhoT); }
   }
 
   // only ADREPORT phi if a family uses it:

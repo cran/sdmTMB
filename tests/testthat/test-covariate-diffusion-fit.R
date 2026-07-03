@@ -1,0 +1,152 @@
+make_nl_fit_data <- function() {
+  set.seed(42)
+  n_t <- 5L
+  n_s <- 6L
+  year <- rep(seq_len(n_t), each = n_s)
+  x <- rep(seq_len(n_s), times = n_t)
+  y <- rep(1:2, length.out = n_t * n_s)
+  x1 <- as.numeric(scale(sin(year) + x / max(x)))
+  x2 <- as.numeric(scale(cos(year / 2) + y / max(y)))
+  eta <- 0.3 + 0.4 * x1 - 0.2 * x2
+  data.frame(
+    y = eta + rnorm(length(eta), sd = 0.15),
+    x1 = x1,
+    x2 = x2,
+    year = year,
+    X = x,
+    Y = y
+  )
+}
+
+make_nl_fit_mesh <- function(dat) {
+  make_mesh(dat, xy_cols = c("X", "Y"), cutoff = 0.5)
+}
+
+test_that("covariate diffusion fits run for each wrapper and combined terms", {
+  skip_on_cran()
+  dat <- make_nl_fit_data()
+  mesh <- make_nl_fit_mesh(dat)
+
+  lag_forms <- list(
+    spatial = ~ diffusion(x1),
+    temporal = ~ time_lag(x1),
+    combined = ~ diffusion(x1) + time_lag(x1)
+  )
+
+  for (nm in names(lag_forms)) {
+    fit <- sdmTMB(
+      y ~ x1 + x2,
+      data = dat,
+      mesh = mesh,
+      time = "year",
+      spatial = "off",
+      spatiotemporal = "off",
+      family = gaussian(),
+      nonlocal_formula = lag_forms[[nm]],
+      control = sdmTMBcontrol(newton_loops = 0, getsd = FALSE)
+    )
+    expect_true(is.finite(fit$model$objective), info = nm)
+  }
+})
+
+test_that("covariate diffusion model matches no-lag model when lag coefficients are fixed at 0", {
+  skip_on_cran()
+  dat <- make_nl_fit_data()
+  mesh <- make_nl_fit_mesh(dat)
+
+  fit_base <- sdmTMB(
+    y ~ x1 + x2,
+    data = dat,
+    mesh = mesh,
+    time = "year",
+    spatial = "off",
+    spatiotemporal = "off",
+    family = gaussian(),
+    control = sdmTMBcontrol(newton_loops = 0, getsd = FALSE)
+  )
+
+  nl_formula <- ~ diffusion(x1) + time_lag(x2)
+  proto <- sdmTMB(
+    y ~ x1 + x2,
+    data = dat,
+    mesh = mesh,
+    time = "year",
+    spatial = "off",
+    spatiotemporal = "off",
+    family = gaussian(),
+    nonlocal_formula = nl_formula,
+    do_fit = FALSE
+  )
+
+  lag_cols <- proto$nonlocal_parsed$term_coef_name
+  lag_idx <- match(lag_cols, colnames(proto$tmb_data$X_ij[[1]]))
+  b_map <- seq_along(proto$tmb_params$b_j)
+  b_map[lag_idx] <- NA_integer_
+  b_start <- proto$tmb_params$b_j
+  b_start[lag_idx] <- 0
+
+  fit_lag_fixed <- sdmTMB(
+    y ~ x1 + x2,
+    data = dat,
+    mesh = mesh,
+    time = "year",
+    spatial = "off",
+    spatiotemporal = "off",
+    family = gaussian(),
+    nonlocal_formula = nl_formula,
+    control = sdmTMBcontrol(
+      start = list(b_j = b_start),
+      map = list(
+        b_j = factor(b_map)
+      ),
+      newton_loops = 0,
+      getsd = FALSE
+    )
+  )
+
+  expect_equal(fit_base$model$objective, fit_lag_fixed$model$objective, tolerance = 1e-6)
+  expect_equal(fit_base$tmb_obj$report()$eta_i, fit_lag_fixed$tmb_obj$report()$eta_i, tolerance = 1e-6)
+  expect_equal(fit_base$tmb_obj$report()$mu_i, fit_lag_fixed$tmb_obj$report()$mu_i, tolerance = 1e-6)
+})
+
+test_that("covariate diffusion derived quantities are conditionally reported", {
+  skip_on_cran()
+  dat <- make_nl_fit_data()
+  mesh <- make_nl_fit_mesh(dat)
+
+  fit_time <- sdmTMB(
+    y ~ x1 + x2,
+    data = dat,
+    mesh = mesh,
+    time = "year",
+    spatial = "off",
+    spatiotemporal = "off",
+    family = gaussian(),
+    nonlocal_formula = ~ time_lag(x1),
+    control = sdmTMBcontrol(newton_loops = 0, getsd = FALSE)
+  )
+  rep_time <- fit_time$tmb_obj$report()
+  expect_true(is.numeric(rep_time$rhoT))
+  expect_true(is.finite(rep_time$rhoT))
+  expect_null(rep_time$MSD)
+  expect_null(rep_time$RMSD)
+
+  fit_space <- sdmTMB(
+    y ~ x1 + x2,
+    data = dat,
+    mesh = mesh,
+    time = "year",
+    spatial = "off",
+    spatiotemporal = "off",
+    family = gaussian(),
+    nonlocal_formula = ~ diffusion(x1),
+    control = sdmTMBcontrol(newton_loops = 0, getsd = FALSE)
+  )
+  rep_space <- fit_space$tmb_obj$report()
+  expect_null(rep_space$rhoT)
+  expect_true(is.numeric(rep_space$MSD))
+  expect_true(is.numeric(rep_space$RMSD))
+  expect_true(is.finite(rep_space$MSD))
+  expect_true(is.finite(rep_space$RMSD))
+  expect_equal(rep_space$RMSD^2, rep_space$MSD, tolerance = 1e-6)
+})

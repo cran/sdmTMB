@@ -1,0 +1,447 @@
+#' Create an areal spatial domain for SAR/CAR models
+#'
+#' @description
+#' `r lifecycle::badge("experimental")`
+#'
+#' Build an areal domain object with adjacency weights and unit labels.
+#' The returned object can be supplied to `mesh` in [sdmTMB()] in areal
+#' SAR/CAR workflows.
+#'
+#' @param spatial_domain A named `igraph` object or an `sf`/`sfc`
+#'   polygon object.
+#' @param space_column Column name in model data that identifies areal
+#'   unit membership. For `sf` polygon input, defaults to `id_column` when
+#'   `id_column` is supplied; otherwise defaults to `"area"`.
+#' @param id_column Optional column name in an `sf` polygon `spatial_domain`
+#'   containing areal unit IDs. If omitted for `sf` polygons, stable IDs are
+#'   generated.
+#' @param adjacency Polygon adjacency type for `sf` polygon input: `"rook"` for
+#'   shared edges or `"queen"` for any touching boundary.
+#'
+#' @return A list with class `c("sdmTMBareal", "sdmTMBdomain")`.
+#' @export
+#'
+#' @examplesIf require("sf", quietly = TRUE)
+#' data(ohio_df)
+#' data(ohio_sf)
+#'
+#' domain <- make_areal_domain(ohio_sf, id_column = "county")
+#' domain$n_s
+#' domain$unit_names
+#'
+#' \donttest{
+#' fit <- sdmTMB(
+#'   cases ~ pct_male,
+#'   data = ohio_df,
+#'   mesh = domain,
+#'   spatial_model = "car",
+#'   family = poisson(link = "log"),
+#'   offset = log(ohio_df$pop)
+#' )
+#' }
+make_areal_domain <- function(spatial_domain, space_column = NULL,
+                              id_column = NULL,
+                              adjacency = c("rook", "queen")) {
+  adjacency <- match.arg(adjacency)
+
+  from_igraph <- FALSE
+  if (inherits(spatial_domain, "igraph")) {
+    space_column <- .resolve_areal_space_column(space_column)
+    from_igraph <- TRUE
+    unit_names <- igraph::V(spatial_domain)$name
+    if (is.null(unit_names) || anyNA(unit_names) || any(!nzchar(unit_names))) {
+      cli::cli_abort(c(
+        "Named igraph input requires non-empty vertex names.",
+        "i" = "Set names with `igraph::V(graph)$name <- ...`."
+      ))
+    }
+    if (anyDuplicated(unit_names)) {
+      cli::cli_abort("igraph vertex names must be unique.")
+    }
+    if (any(igraph::which_loop(spatial_domain))) {
+      cli::cli_abort("igraph `spatial_domain` cannot contain self-neighbor loops.")
+    }
+    weight_attr <- if ("weight" %in% igraph::edge_attr_names(spatial_domain)) "weight" else NULL
+    W <- .as_general_dgC(igraph::as_adjacency_matrix(
+      spatial_domain,
+      sparse = TRUE,
+      attr = weight_attr
+    ))
+    Matrix::diag(W) <- 0
+    dimnames(W) <- list(as.character(unit_names), as.character(unit_names))
+  } else if (inherits(spatial_domain, "sf") || inherits(spatial_domain, "sfc")) {
+    space_column <- .resolve_areal_space_column(space_column, id_column = id_column)
+    W <- .sf_areal_adjacency_matrix(spatial_domain, id_column = id_column, adjacency = adjacency)
+  } else {
+    cli::cli_abort("`spatial_domain` must be a named igraph object or an sf/sfc polygon object.")
+  }
+
+  .validate_areal_matrix_structure(W, from_igraph = from_igraph)
+  unit_names <- as.character(rownames(W))
+
+  .validate_areal_matrix_values(W, stage = "before normalization")
+  W_raw <- methods::as(W, "dgCMatrix")
+  W <- .normalize_areal_W(W_raw)
+  .validate_areal_matrix_values(W, stage = "after normalization")
+  .validate_areal_row_sums(W)
+
+  structure(
+    list(
+      W = W,
+      W_raw = W_raw,
+      n_s = as.integer(length(unit_names)),
+      unit_names = unit_names,
+      space_column = space_column
+    ),
+    class = c("sdmTMBareal", "sdmTMBdomain")
+  )
+}
+
+.validate_areal_matrix_structure <- function(W, from_igraph = FALSE) {
+  if (!inherits(W, "sparseMatrix")) {
+    cli::cli_abort("Internal areal matrix must be sparse.")
+  }
+  if (nrow(W) != ncol(W)) {
+    cli::cli_abort("`spatial_domain` matrix must be square.")
+  }
+  rn <- rownames(W)
+  cn <- colnames(W)
+  if (is.null(rn) || is.null(cn)) {
+    cli::cli_abort("`spatial_domain` matrix must have row and column names.")
+  }
+  if (!identical(rn, cn)) {
+    cli::cli_abort("`spatial_domain` row and column names must be identical and in the same order.")
+  }
+  if (anyNA(rn) || any(!nzchar(rn))) {
+    cli::cli_abort("`spatial_domain` unit names cannot contain missing or empty values.")
+  }
+  if (anyDuplicated(rn)) {
+    cli::cli_abort("`spatial_domain` unit names must be unique.")
+  }
+  if (!from_igraph && any(Matrix::diag(W) != 0)) {
+    cli::cli_abort("`spatial_domain` matrix must have a zero diagonal (no self-neighbors).")
+  }
+}
+
+.validate_areal_matrix_values <- function(W, stage) {
+  if (any(!is.finite(W@x))) {
+    cli::cli_abort("`spatial_domain` matrix has non-finite values {stage}.")
+  }
+  if (any(W@x < 0)) {
+    cli::cli_abort("`spatial_domain` matrix has negative weights {stage}.")
+  }
+  if (any(Matrix::diag(W) != 0)) {
+    cli::cli_abort("`spatial_domain` matrix must have a zero diagonal {stage}.")
+  }
+}
+
+.normalize_areal_W <- function(W) {
+  rs <- Matrix::rowSums(W)
+  islands <- which(rs == 0)
+  if (length(islands) > 0L) {
+    island_names <- rownames(W)[islands]
+    cli::cli_warn(c(
+      "Found areal units with no neighbors (islands).",
+      "i" = paste(island_names, collapse = ", "),
+      "i" = "These units will be treated as conditionally independent spatial effects."
+    ))
+  }
+
+  non_islands <- which(rs > 0)
+  if (!length(non_islands)) return(W)
+
+  W[non_islands, ] <- Matrix::Diagonal(x = 1 / rs[non_islands]) %*%
+    W[non_islands, , drop = FALSE]
+  methods::as(W, "dgCMatrix")
+}
+
+.validate_areal_row_sums <- function(W, tol = 1e-8) {
+  rs <- Matrix::rowSums(W)
+  non_islands <- which(rs > 0)
+  if (!length(non_islands)) return(invisible(NULL))
+
+  bad <- non_islands[abs(rs[non_islands] - 1) > tol]
+  if (length(bad)) {
+    cli::cli_abort(c(
+      "Normalized areal matrix rows do not sum to 1 for non-island units.",
+      "i" = paste(rownames(W)[bad], collapse = ", ")
+    ))
+  }
+  invisible(NULL)
+}
+
+.resolve_areal_space_column <- function(space_column, id_column = NULL) {
+  if (is.null(space_column) && !is.null(id_column)) {
+    space_column <- id_column
+  }
+  if (is.null(space_column)) {
+    space_column <- "area"
+  }
+  if (!is.character(space_column) || length(space_column) != 1L || is.na(space_column) || !nzchar(space_column)) {
+    cli::cli_abort("`space_column` must be a single non-empty column name.")
+  }
+  space_column
+}
+
+.as_general_dgC <- function(x) {
+  if (!inherits(x, "sparseMatrix")) {
+    x <- Matrix::Matrix(x, sparse = TRUE)
+  }
+  if (inherits(x, "symmetricMatrix")) {
+    x <- methods::as(x, "generalMatrix")
+  }
+  methods::as(x, "dgCMatrix")
+}
+
+.as_sf_polygons <- function(x, arg = "spatial_domain") {
+  if (!requireNamespace("sf", quietly = TRUE)) {
+    cli::cli_abort("Package {.pkg sf} must be installed to use `sf` areal domains.")
+  }
+  if (inherits(x, "sfc")) {
+    x <- sf::st_sf(geometry = x)
+  }
+  if (!inherits(x, "sf")) {
+    cli::cli_abort("`{arg}` must be an `sf` or `sfc` polygon object.")
+  }
+  geom_type <- as.character(sf::st_geometry_type(x))
+  if (!all(geom_type %in% c("POLYGON", "MULTIPOLYGON"))) {
+    cli::cli_abort("`{arg}` must contain only polygon geometries.")
+  }
+  x
+}
+
+.align_sf_crs <- function(x, target) {
+  if (is.na(sf::st_crs(target)) || is.na(sf::st_crs(x))) {
+    return(x)
+  }
+  if (!identical(sf::st_crs(x), sf::st_crs(target))) {
+    x <- sf::st_transform(x, sf::st_crs(target))
+  }
+  x
+}
+
+.sf_unit_names <- function(x, id_column = NULL) {
+  if (is.null(id_column)) {
+    return(sprintf("area_%03d", seq_len(nrow(x))))
+  }
+  if (!is.character(id_column) || length(id_column) != 1L || is.na(id_column) || !nzchar(id_column)) {
+    cli::cli_abort("`id_column` must be a single non-empty column name.")
+  }
+  if (!id_column %in% names(x)) {
+    cli::cli_abort("`id_column` {.field {id_column}} was not found in `spatial_domain`.")
+  }
+  unit_names <- as.character(x[[id_column]])
+  if (anyNA(unit_names) || any(!nzchar(unit_names))) {
+    cli::cli_abort("`id_column` cannot contain missing or empty values.")
+  }
+  if (anyDuplicated(unit_names)) {
+    cli::cli_abort("`id_column` values must be unique.")
+  }
+  unit_names
+}
+
+.sf_areal_adjacency_matrix <- function(spatial_domain, id_column = NULL,
+                                       adjacency = c("rook", "queen")) {
+  adjacency <- match.arg(adjacency)
+  sf_domain <- .as_sf_polygons(spatial_domain)
+  unit_names <- .sf_unit_names(sf_domain, id_column = id_column)
+
+  neighbors <- switch(adjacency,
+    rook = sf::st_relate(sf_domain, sf_domain, pattern = "F***1****"),
+    queen = sf::st_touches(sf_domain, sf_domain)
+  )
+  from <- rep(seq_along(neighbors), lengths(neighbors))
+  to <- unlist(neighbors, use.names = FALSE)
+  keep <- from != to
+  from <- from[keep]
+  to <- to[keep]
+  Matrix::sparseMatrix(
+    i = from,
+    j = to,
+    x = 1,
+    dims = c(length(unit_names), length(unit_names)),
+    dimnames = list(unit_names, unit_names)
+  )
+}
+
+is_areal_domain <- function(x) inherits(x, "sdmTMBareal")
+
+is_areal_fit <- function(object) {
+  if (!is.null(object$tmb_data) && "spatial_model" %in% names(object$tmb_data)) {
+    if (object$tmb_data$spatial_model %in% c(1L, 2L)) {
+      return(TRUE)
+    }
+  }
+  !is.null(object$spde) && is_areal_domain(object$spde)
+}
+
+is_car_fit <- function(object) {
+  !is.null(object$tmb_data) &&
+    "spatial_model" %in% names(object$tmb_data) &&
+    identical(object$tmb_data$spatial_model, 2L)
+}
+
+domain_n_s <- function(mesh) {
+  if (is_areal_domain(mesh)) mesh$n_s else nrow(mesh$mesh$loc)
+}
+
+domain_obs_index <- function(mesh, data) {
+  match(as.character(data[[mesh$space_column]]), mesh$unit_names)
+}
+
+domain_pred_index <- function(mesh, newdata) {
+  match(as.character(newdata[[mesh$space_column]]), mesh$unit_names)
+}
+
+areal_projection_matrix <- function(mesh, data) {
+  idx <- domain_obs_index(mesh, data)
+  if (anyNA(idx)) {
+    missing_units <- unique(as.character(data[[mesh$space_column]])[is.na(idx)])
+    cli::cli_abort(c(
+      "Some areal units were not found in the domain.",
+      "i" = paste(missing_units, collapse = ", ")
+    ))
+  }
+  Matrix::sparseMatrix(
+    i = seq_len(nrow(data)),
+    j = idx,
+    x = 1,
+    dims = c(nrow(data), mesh$n_s)
+  )
+}
+
+prepare_spatial_domain <- function(mesh, data, mesh_missing, share_range = TRUE,
+                                   anisotropy = FALSE, nonlocal_formula, priors = sdmTMBpriors(),
+                                   normalize, experimental = NULL,
+                                   share_range_user = share_range,
+                                   spatial_model = c("spde", "sar", "car"),
+                                   sar_weight_style = c("row", "raw")) {
+  spatial_model <- match.arg(tolower(spatial_model[1L]), c("spde", "sar", "car"))
+  sar_weight_style <- match.arg(sar_weight_style)
+  is_areal <- !mesh_missing && is_areal_domain(mesh)
+  spde <- mesh
+
+  if (spatial_model == "spde" && is_areal) {
+    cli::cli_abort("`spatial_model = \"spde\"` requires an SPDE mesh from `make_mesh()`. Use `spatial_model = \"sar\"` or `\"car\"` with an areal domain.")
+  }
+  if (spatial_model %in% c("sar", "car") && !is_areal) {
+    cli::cli_abort("`spatial_model = \"{spatial_model}\"` requires an areal domain from `make_areal_domain()`.")
+  }
+
+  if (is_areal) {
+    space_column <- spde$space_column
+    if (!space_column %in% names(data)) {
+      cli::cli_abort("Column {.field {space_column}} from the areal domain was not found in `data`.")
+    }
+    if (anyNA(data[[space_column]])) {
+      cli::cli_abort("Areal domain column {.field {space_column}} contains missing values.")
+    }
+    areal_idx <- domain_obs_index(spde, data)
+    if (anyNA(areal_idx)) {
+      cli::cli_abort("Some values in `data[[{space_column}]]` have no match in the areal domain.")
+    }
+
+    if (isTRUE(anisotropy)) {
+      cli::cli_abort("`anisotropy` is not supported with areal domains.")
+    }
+    if ("spde_barrier" %in% names(spde)) {
+      cli::cli_abort("Barrier models are not supported with areal domains.")
+    }
+    if (!is.null(nonlocal_formula)) {
+      cli::cli_abort("`nonlocal_formula` is not supported with areal domains.")
+    }
+    share_range_user <- unlist(share_range_user)
+    if (any(!share_range_user)) {
+      cli::cli_abort("`share_range = FALSE` is not supported with areal domains in v1.")
+    }
+    if (any(c(!is.na(priors$matern_s[1:2]), !is.na(priors$matern_st[1:2])))) {
+      cli::cli_abort("PC Matern priors are not supported with areal domains.")
+    }
+    if (!is.null(experimental) &&
+        "epsilon_model" %in% names(experimental) &&
+        !is.null(experimental$epsilon_model)) {
+      cli::cli_abort("`experimental$epsilon_model` is not supported with areal domains.")
+    }
+    if (spatial_model == "car" && !Matrix::isSymmetric(spde$W_raw)) {
+      cli::cli_abort("`spatial_model = \"car\"` requires a symmetric areal adjacency matrix.")
+    }
+
+    return(list(
+      type = "areal",
+      spatial_model = spatial_model,
+      spde = spde,
+      n_s = spde$n_s,
+      A_st = areal_projection_matrix(spde, data),
+      A_spatial_index = seq_len(nrow(data)) - 1L,
+      W_ss = if (spatial_model == "car" || sar_weight_style == "raw") spde$W_raw else spde$W,
+      sar_weight_style = sar_weight_style,
+      normalize_in_r = 0L,
+      barrier = 0L,
+      barrier_scaling = c(1, 1),
+      anisotropy = 0L,
+      spde_struct = dummy_spde(),
+      spde_aniso_struct = dummy_spde_aniso(),
+      spde_barrier_struct = dummy_spde_barrier()
+    ))
+  }
+
+  barrier <- "spde_barrier" %in% names(spde)
+  if (barrier && anisotropy) {
+    cli::cli_warn("Using a barrier mesh; therefore, anistropy will be disabled.")
+    anisotropy <- FALSE
+  }
+  if (any(c(!is.na(priors$matern_s[1:2]), !is.na(priors$matern_st[1:2]))) && anisotropy) {
+    cli::cli_warn("Using PC Matern priors; therefore, anistropy will be disabled.")
+    anisotropy <- FALSE
+  }
+  if (!"A_st" %in% names(spde)) {
+    cli::cli_abort("`mesh` was created with an old version of `make_mesh()`.")
+  }
+
+  list(
+    type = "spde",
+    spatial_model = spatial_model,
+    spde = spde,
+    n_s = nrow(spde$mesh$loc),
+    A_st = spde$A_st,
+    A_spatial_index = spde$sdm_spatial_id - 1L,
+    W_ss = dummy_sparse_1x1(),
+    sar_weight_style = "row",
+    normalize_in_r = as.integer(normalize),
+    barrier = as.integer(barrier),
+    barrier_scaling = if (barrier) spde$barrier_scaling else c(1, 1),
+    anisotropy = as.integer(anisotropy),
+    spde_struct = get_spde_matrices(spde),
+    spde_aniso_struct = make_anisotropy_spde(spde, anisotropy),
+    spde_barrier_struct = make_barrier_spde(spde)
+  )
+}
+
+dummy_sparse_1x1 <- function() {
+  Matrix::sparseMatrix(i = 1L, j = 1L, x = 0, dims = c(1L, 1L))
+}
+
+dummy_spde <- function() {
+  m <- dummy_sparse_1x1()
+  list(M0 = m, M1 = m, M2 = m)
+}
+
+dummy_spde_aniso <- function() {
+  m <- Matrix::Matrix(0, 1, 1, sparse = TRUE)
+  list(
+    n_s = 0L,
+    n_tri = 0L,
+    Tri_Area = rep(0, 1),
+    E0 = matrix(0, 1),
+    E1 = matrix(0, 1),
+    E2 = matrix(0, 1),
+    TV = matrix(0, 1),
+    G0 = m,
+    G0_inv = m
+  )
+}
+
+dummy_spde_barrier <- function() {
+  m <- dummy_sparse_1x1()
+  list(C0 = rep(1, 2), C1 = rep(1, 2), D0 = m, D1 = m, I = m)
+}

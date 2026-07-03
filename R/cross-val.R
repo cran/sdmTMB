@@ -85,9 +85,9 @@ ll_sdmTMB <- function(object, withheld_y, withheld_mu) {
 #' @param time The name of the time column. Leave as `NULL` if this is only
 #'   spatial data.
 #' @param k_folds Number of folds.
-#' @param fold_ids Optional vector containing user fold IDs. Can also be a
-#'   single string, e.g. `"fold_id"` representing the name of the variable in
-#'   `data`. Ignored if `lfo` is TRUE
+#' @param fold_ids Optional vector of user-supplied fold IDs. Can also be a
+#'   single string, e.g. `"fold_id"`, naming a variable in `data`.
+#'   Ignored if `lfo = TRUE`.
 #' @param lfo Logical. Use leave-future-out (LFO) cross validation? If `TRUE`,
 #'   data from earlier time steps are used to predict future time steps. The
 #'   `time` argument must be specified. See Details section below.
@@ -108,9 +108,9 @@ ll_sdmTMB <- function(object, withheld_y, withheld_mu) {
 #'   [tidy()], [cv_to_waywiser()]) will not work.
 #' @param future_globals A character vector of global variables used within
 #'   arguments if an error is returned that \pkg{future.apply} can't find an
-#'   object. This vector is appended to `TRUE` and passed to the argument
+#'   object. This vector is appended to `TRUE` and passed to the
 #'   `future.globals` in [future.apply::future_lapply()]. Useful if global
-#'   objects are used to specify arguments like priors, families, etc.
+#'   objects are used to specify arguments such as priors or families.
 #' @param ... All other arguments required to run the [sdmTMB()] model. The
 #'   `weights` argument is supported and will be combined with the internal
 #'   fold-assignment mechanism (held-out data are assigned weight 0).
@@ -126,7 +126,7 @@ ll_sdmTMB <- function(object, withheld_y, withheld_mu) {
 #'   predictive density per fold). More positive values indicate better
 #'   out-of-sample prediction.
 #' * `sum_loglik`: Sum of `fold_loglik` across all folds (total log predictive
-#'   density). Use this to compare models—more positive values are better.
+#'   density). Use this to compare models; larger values are better.
 #' * `pdHess`: Logical vector: was the Hessian positive definite for each fold?
 #' * `converged`: Logical: did all folds converge (all `pdHess` `TRUE`)?
 #' * `max_gradients`: Maximum absolute gradient for each fold.
@@ -159,10 +159,10 @@ ll_sdmTMB <- function(object, withheld_y, withheld_mu) {
 #' - Fit data to time steps 1 to 6, predict and validate step 8.
 #' - Fit data to time steps 1 to 7, predict and validate step 9.
 #'
-#' Note these are time steps as they are presented in order in the data.
-#' For example, in the `pcod` data example below steps between data points
-#' are not always one year but an `lfo_forecast = 2` forecasts 2 time
-#' steps as presented not two years.
+#' Note that these are time steps in the order they appear in the data.
+#' For example, in the `pcod` data example below, steps between observations
+#' are not always one year, so `lfo_forecast = 2` forecasts two observed time
+#' steps ahead, not necessarily two calendar years.
 #'
 #' See example below.
 #'
@@ -403,11 +403,21 @@ sdmTMB_cv <- function(
       cv_data <- data[data$cv_fold == k, , drop = FALSE]
     }
 
+    time_indexed_nonlocal <- !is.null(object$nonlocal_formula_parsed) &&
+      !is.null(object$time)
+
     # FIXME: only use TMB report() below to be faster!
     # predict for withheld data:
     # cli_inform("Testing on data fold {k}.")
-    predicted <- predict(object, newdata = cv_data, type = "response",
-      offset = if (!is.null(.offset)) cv_data[[.offset]] else rep(0, nrow(cv_data)))
+    if (time_indexed_nonlocal) {
+      predicted_full <- predict(object, newdata = data, type = "response",
+        offset = if (!is.null(.offset)) data[[.offset]] else rep(0, nrow(data)))
+      match_idx <- match(cv_data[["_sdm_order_"]], predicted_full[["_sdm_order_"]])
+      predicted <- predicted_full[match_idx, , drop = FALSE]
+    } else {
+      predicted <- predict(object, newdata = cv_data, type = "response",
+        offset = if (!is.null(.offset)) cv_data[[.offset]] else rep(0, nrow(cv_data)))
+    }
 
     cv_data$cv_predicted <- predicted$est
     response <- get_response(object$formula[[1]])
